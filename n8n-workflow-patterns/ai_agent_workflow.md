@@ -269,6 +269,8 @@ Query Phase (recurring):
 - **Serper Tool** - Google search
 - **Wolfram Alpha Tool** - Computational knowledge
 - **Custom Tool** - Define with Code node
+- **AI Agent Tool** - Sub-agents for specialized tasks
+- **MCP Client Tool** - Model Context Protocol servers
 
 **Example** (Calculator Tool):
 ```
@@ -278,6 +280,40 @@ AI Agent
 
 User: "What's 15% of 2,847?"
 AI: *uses calculator tool* → "426.05"
+```
+
+### MCP Client Tool
+**Use when**: Connecting to MCP servers (filesystem, databases, etc.)
+
+```javascript
+{
+  name: "Filesystem Tool",
+  type: "@n8n/n8n-nodes-langchain.mcpClientTool",
+  parameters: {
+    description: "Access file system to read files and list directories",
+    mcpServer: {
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"]
+    },
+    tool: "read_file"
+  }
+}
+```
+
+### AI Agent Tool (Sub-Agents)
+**Use when**: Need specialized expertise from a sub-agent
+
+```javascript
+{
+  name: "Research Specialist",
+  type: "@n8n/n8n-nodes-langchain.agentTool",
+  parameters: {
+    name: "research_specialist",
+    description: "Expert researcher for detailed research tasks",
+    systemMessage: "You are a research specialist. Search thoroughly and provide analysis."
+  }
+}
 ```
 
 ### Database as Tool
@@ -471,6 +507,60 @@ Format:
 - Include query used (for transparency)
 - Suggest follow-up analyses when relevant
 ```
+
+---
+
+## Advanced Patterns
+
+### Streaming Responses
+For real-time user experience, set Chat Trigger to streaming mode:
+
+```javascript
+// Chat Trigger parameters
+{
+  options: {
+    responseMode: "streaming"  // or "lastNode" for non-streaming
+  }
+}
+```
+
+**Important**: When using streaming mode, the AI Agent must NOT have main output connections - responses stream back through Chat Trigger automatically.
+
+### Fallback Language Models
+For production reliability, connect a fallback model:
+
+```javascript
+// Primary model (targetIndex: 0)
+{
+  type: "addConnection",
+  source: "OpenAI Chat Model",
+  target: "AI Agent",
+  sourceOutput: "ai_languageModel",
+  targetIndex: 0
+}
+
+// Fallback model (targetIndex: 1)
+{
+  type: "addConnection",
+  source: "Anthropic Chat Model",
+  target: "AI Agent",
+  sourceOutput: "ai_languageModel",
+  targetIndex: 1
+}
+```
+
+Enable with: `"parameters.needsFallback": true` on the AI Agent node.
+
+### RAG (Retrieval-Augmented Generation)
+Complete knowledge base setup chain:
+
+```
+Documents → Text Splitter → Vector Store ← Embeddings
+                              ↓
+                        Vector Store Tool → AI Agent
+```
+
+Use `ai_embedding`, `ai_document`, `ai_vectorStore`, and `ai_tool` connection types.
 
 ---
 

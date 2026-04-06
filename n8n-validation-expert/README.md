@@ -135,7 +135,7 @@ let config = {
   operation: "create"
 };
 
-const result1 = validate_node_operation({
+const result1 = validate_node({
   nodeType: "nodes-base.slack",
   config,
   profile: "runtime"
@@ -144,7 +144,7 @@ const result1 = validate_node_operation({
 
 // Iteration 2
 config.name = "general";
-const result2 = validate_node_operation({...});
+const result2 = validate_node({...});
 // → Valid! ✅
 ```
 
@@ -152,7 +152,7 @@ const result2 = validate_node_operation({...});
 
 ```javascript
 // Run validation
-const result = validate_node_operation({
+const result = validate_node({
   nodeType: "nodes-base.slack",
   config,
   profile: "runtime"
@@ -233,7 +233,7 @@ if (preview.fixCount > 0) {
 
 1. **eval-001-missing-required-field.json**
    - Tests error interpretation
-   - Guides to get_node_essentials
+   - Guides to get_node
    - References ERROR_CATALOG.md
 
 2. **eval-002-false-positive.json**
@@ -272,7 +272,7 @@ if (preview.fixCount > 0) {
 ## Related Documentation
 
 - **n8n-mcp MCP Server**: Provides validation tools
-- **n8n Validation API**: validate_node_operation, validate_workflow, n8n_autofix_workflow
+- **n8n Validation API**: validate_node, validate_workflow, n8n_autofix_workflow
 - **n8n Issues**: #304 (IF metadata), #306 (Switch branches), #338 (credentials)
 
 ## Version History

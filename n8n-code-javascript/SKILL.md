@@ -644,8 +644,8 @@ Consider other nodes when:
 
 **n8n MCP Tools Expert**:
 - How to find Code node: `search_nodes({query: "code"})`
-- Get configuration help: `get_node_essentials("nodes-base.code")`
-- Validate code: `validate_node_operation()`
+- Get configuration help: `get_node({nodeType: "nodes-base.code"})`
+- Validate code: `validate_node({nodeType: "nodes-base.code", config: {...}})`
 
 **n8n Node Configuration**:
 - Mode selection (All Items vs Each Item)

@@ -228,7 +228,8 @@ These skills work together with Workflow Patterns:
 - Understand node operations (get_node)
 - Create workflows (n8n_create_workflow)
 - Deploy templates (n8n_deploy_template)
-- Use ai_agents_guide for AI pattern guidance
+- Use `ai_agents_guide()` for AI pattern guidance
+- Manage data tables with `n8n_manage_datatable`
 
 **n8n Expression Syntax** - Use to:
 - Write expressions in transformation nodes

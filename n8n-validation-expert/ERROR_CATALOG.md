@@ -885,7 +885,7 @@ validate_node({nodeType: "nodes-base.slack", config, profile: "runtime"});
 
 **Solution**:
 ```javascript
-const result = validate_node_operation({...});
+const result = validate_node({...});
 
 // 1. Fix errors (must fix)
 result.errors.forEach(error => {

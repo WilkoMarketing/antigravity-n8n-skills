@@ -226,8 +226,8 @@ const value = $json.field;
 
 ### n8n MCP Tools Expert
 - Find Code node: `search_nodes({query: "code"})`
-- Get configuration: `get_node_essentials("nodes-base.code")`
-- Validate code: `validate_node_operation()`
+- Get configuration: `get_node("nodes-base.code")`
+- Validate code: `validate_node()`
 
 ### n8n Node Configuration
 - Mode selection (All Items vs Each Item)

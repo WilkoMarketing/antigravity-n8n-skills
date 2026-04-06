@@ -1,6 +1,6 @@
 ---
 name: n8n-mcp-tools-expert
-description: Expert guide for using n8n-mcp MCP tools effectively. Use when searching for nodes, validating configurations, accessing templates, managing workflows, or using any n8n-mcp tool. Provides tool selection guidance, parameter formats, and common patterns.
+description: Expert guide for using n8n-mcp MCP tools effectively. Use when searching for nodes, validating configurations, accessing templates, managing workflows, managing credentials, auditing instance security, or using any n8n-mcp tool. Provides tool selection guidance, parameter formats, and common patterns.
 ---
 
 # n8n MCP Tools Expert
@@ -17,7 +17,10 @@ n8n-mcp provides tools organized into categories:
 2. **Configuration Validation** → [VALIDATION_GUIDE.md](VALIDATION_GUIDE.md)
 3. **Workflow Management** → [WORKFLOW_GUIDE.md](WORKFLOW_GUIDE.md)
 4. **Template Library** - Search and deploy 2,700+ real workflows
-5. **Documentation & Guides** - Tool docs, AI agent guide, Code node guides
+5. **Data Tables** - Manage n8n data tables and rows (`n8n_manage_datatable`)
+6. **Credential Management** - Full credential CRUD + schema discovery (`n8n_manage_credentials`)
+7. **Security & Audit** - Instance security auditing with custom deep scan (`n8n_audit_instance`)
+8. **Documentation & Guides** - Tool docs, AI agent guide, Code node guides
 
 ---
 
@@ -34,6 +37,10 @@ n8n-mcp provides tools organized into categories:
 | `n8n_update_partial_workflow` | Editing workflows (MOST USED!) | 50-200ms |
 | `validate_workflow` | Checking complete workflow | 100-500ms |
 | `n8n_deploy_template` | Deploy template to n8n instance | 200-500ms |
+| `n8n_manage_datatable` | Managing data tables and rows | 50-500ms |
+| `n8n_manage_credentials` | Credential CRUD + schema discovery | 50-500ms |
+| `n8n_audit_instance` | Security audit (built-in + custom scan) | 500-5000ms |
+| `n8n_autofix_workflow` | Auto-fix validation errors | 200-1500ms |
 
 ---
 
@@ -379,12 +386,14 @@ See [VALIDATION_GUIDE.md](VALIDATION_GUIDE.md) for:
 ### Workflow Management
 See [WORKFLOW_GUIDE.md](WORKFLOW_GUIDE.md) for:
 - n8n_create_workflow
-- n8n_update_partial_workflow (17 operation types!)
+- n8n_update_partial_workflow (19 operation types including patchNodeField!)
 - Smart parameters (branch, case)
 - AI connection types (8 types)
 - Workflow activation (activateWorkflow/deactivateWorkflow)
 - n8n_deploy_template
 - n8n_workflow_versions
+- n8n_manage_credentials (credential CRUD + schema discovery)
+- n8n_audit_instance (security auditing)
 
 ---
 
@@ -448,6 +457,173 @@ n8n_deploy_template({
 
 ---
 
+## Data Table Management
+
+### n8n_manage_datatable
+
+Unified tool for managing n8n data tables and rows. Supports CRUD operations on tables and rows with filtering, pagination, and dry-run support.
+
+**Table Actions**: `createTable`, `listTables`, `getTable`, `updateTable`, `deleteTable`
+**Row Actions**: `getRows`, `insertRows`, `updateRows`, `upsertRows`, `deleteRows`
+
+```javascript
+// Create a data table
+n8n_manage_datatable({
+  action: "createTable",
+  name: "Contacts",
+  columns: [
+    {name: "email", type: "string"},
+    {name: "score", type: "number"}
+  ]
+})
+
+// Get rows with filter
+n8n_manage_datatable({
+  action: "getRows",
+  tableId: "dt-123",
+  filter: {
+    filters: [{columnName: "status", condition: "eq", value: "active"}]
+  },
+  limit: 50
+})
+
+// Insert rows
+n8n_manage_datatable({
+  action: "insertRows",
+  tableId: "dt-123",
+  data: [{email: "a@b.com", score: 10}],
+  returnType: "all"
+})
+
+// Update with dry run (preview changes)
+n8n_manage_datatable({
+  action: "updateRows",
+  tableId: "dt-123",
+  filter: {filters: [{columnName: "score", condition: "lt", value: 5}]},
+  data: {status: "inactive"},
+  dryRun: true
+})
+
+// Upsert (update or insert)
+n8n_manage_datatable({
+  action: "upsertRows",
+  tableId: "dt-123",
+  filter: {filters: [{columnName: "email", condition: "eq", value: "a@b.com"}]},
+  data: {score: 15},
+  returnData: true
+})
+```
+
+**Filter conditions**: `eq`, `neq`, `like`, `ilike`, `gt`, `gte`, `lt`, `lte`
+
+**Best practices**:
+- Use `dryRun: true` before bulk updates/deletes to verify filter correctness
+- Define column types upfront (`string`, `number`, `boolean`, `date`)
+- Use `returnType: "count"` (default) for insertRows to minimize response size
+- `deleteRows` requires a filter - cannot delete all rows without one
+
+---
+
+## Credential Management
+
+### n8n_manage_credentials
+
+Unified tool for managing n8n credentials. Supports full CRUD operations and schema discovery.
+
+**Actions**: `list`, `get`, `create`, `update`, `delete`, `getSchema`
+
+```javascript
+// List all credentials
+n8n_manage_credentials({action: "list"})
+// → Returns: id, name, type, createdAt, updatedAt (never exposes secrets)
+
+// Get credential by ID
+n8n_manage_credentials({action: "get", id: "123"})
+// → Returns: credential metadata (data field stripped for security)
+
+// Discover required fields for a credential type
+n8n_manage_credentials({action: "getSchema", credentialType: "httpHeaderAuth"})
+// → Returns: required fields, types, descriptions
+
+// Create credential
+n8n_manage_credentials({
+  action: "create",
+  name: "My Slack Token",
+  type: "slackApi",
+  data: {accessToken: "xoxb-..."}
+})
+
+// Update credential
+n8n_manage_credentials({
+  action: "update",
+  id: "123",
+  name: "Updated Name",
+  data: {accessToken: "xoxb-new-..."},
+  type: "slackApi"  // Optional, needed by some n8n versions
+})
+
+// Delete credential
+n8n_manage_credentials({action: "delete", id: "123"})
+```
+
+**Security**:
+- `get`, `create`, and `update` responses strip the `data` field (defense-in-depth)
+- `get` action falls back to list+filter if direct GET returns 403/405 (not all n8n versions expose this endpoint)
+- Credential request bodies are redacted from debug logs
+
+**Best practices**:
+- Use `getSchema` before `create` to discover required fields for a credential type
+- The `data` field contains the actual secret values — provide it only on create/update
+- Always verify credential creation by listing afterward
+
+---
+
+## Security & Audit
+
+### n8n_audit_instance
+
+Security audit tool that combines n8n's built-in audit with custom deep scanning of all workflows.
+
+```javascript
+// Full audit (default — runs both built-in + custom scan)
+n8n_audit_instance()
+
+// Built-in audit only (specific categories)
+n8n_audit_instance({
+  categories: ["credentials", "nodes"],
+  includeCustomScan: false
+})
+
+// Custom scan only (specific checks)
+n8n_audit_instance({
+  customChecks: ["hardcoded_secrets", "unauthenticated_webhooks"]
+})
+```
+
+**Built-in audit categories**: `credentials`, `database`, `nodes`, `instance`, `filesystem`
+
+**Custom deep scan checks**:
+- `hardcoded_secrets` — Detects 50+ patterns for API keys, tokens, passwords (OpenAI, AWS, Stripe, GitHub, Slack, etc.) plus PII (email, phone, credit card). Secrets are masked in output (first 6 + last 4 chars).
+- `unauthenticated_webhooks` — Flags webhook/form triggers without authentication
+- `error_handling` — Flags workflows with 3+ nodes and no error handling
+- `data_retention` — Flags workflows saving all execution data (success + failure)
+
+**Parameters** (all optional):
+- `categories` — Array of built-in audit categories
+- `includeCustomScan` — Boolean (default: `true`)
+- `customChecks` — Array subset of the 4 custom checks
+- `daysAbandonedWorkflow` — Days threshold for abandoned workflow detection
+
+**Output**: Actionable markdown report with:
+- Summary table (critical/high/medium/low finding counts)
+- Findings grouped by workflow
+- Remediation Playbook with three sections:
+  - **Auto-fixable** — Items you can fix with tool chains (e.g., add auth to webhooks)
+  - **Requires review** — Items needing human judgment (e.g., PII detection)
+  - **Requires user action** — Items needing manual intervention (e.g., rotate exposed keys)
+
+---
+
 ## Self-Help Tools
 
 ### Get Tool Documentation
@@ -473,6 +649,9 @@ tools_documentation({topic: "python_code_node_guide", depth: "full"})
 // Comprehensive AI workflow guide
 ai_agents_guide()
 // Returns: Architecture, connections, tools, validation, best practices
+
+// Or via tools_documentation
+tools_documentation({topic: "ai_agents_guide", depth: "full"})
 ```
 
 ### Health Check
@@ -498,14 +677,17 @@ n8n_health_check({mode: "diagnostic"})
 
 **Requires n8n API** (N8N_API_URL + N8N_API_KEY):
 - n8n_create_workflow
-- n8n_update_partial_workflow
+- n8n_update_partial_workflow, n8n_update_full_workflow
 - n8n_validate_workflow (by ID)
-- n8n_list_workflows, n8n_get_workflow
+- n8n_list_workflows, n8n_get_workflow, n8n_delete_workflow
 - n8n_test_workflow
 - n8n_executions
 - n8n_deploy_template
 - n8n_workflow_versions
 - n8n_autofix_workflow
+- n8n_manage_datatable
+- n8n_manage_credentials
+- n8n_audit_instance
 
 If API tools unavailable, use templates and validation-only workflows.
 
@@ -575,6 +757,8 @@ validate_node({nodeType: "nodes-base.webhook", config: {}, mode: "minimal"})
 | validate_node (minimal) | <50ms | Small |
 | validate_node (full) | <100ms | Medium |
 | validate_workflow | 100-500ms | Medium |
+| n8n_manage_credentials | 50-500ms | Small-Medium |
+| n8n_audit_instance | 500-5000ms | Large |
 | n8n_create_workflow | 100-500ms | Medium |
 | n8n_update_partial_workflow | 50-200ms | Small |
 | n8n_deploy_template | 200-500ms | Medium |
@@ -616,6 +800,10 @@ validate_node({nodeType: "nodes-base.webhook", config: {}, mode: "minimal"})
 6. **Auto-sanitization** runs on ALL nodes during updates
 7. Workflows can be **activated via API** (`activateWorkflow` operation)
 8. Workflows are built **iteratively** (56s avg between edits)
+9. **Data tables** managed with `n8n_manage_datatable` (CRUD + filtering)
+10. **Credentials** managed with `n8n_manage_credentials` (CRUD + schema discovery)
+11. **Security audits** via `n8n_audit_instance` (built-in + custom deep scan)
+12. **AI agent guide** available via `ai_agents_guide()` tool
 
 **Common Workflow**:
 1. search_nodes → find node

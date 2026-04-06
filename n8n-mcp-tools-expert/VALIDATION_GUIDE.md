@@ -282,12 +282,17 @@ n8n_autofix_workflow({
 ```
 
 **Fix Types**:
-- `expression-format` - Fix expression syntax
-- `typeversion-correction` - Correct typeVersion
-- `error-output-config` - Fix error output settings
-- `webhook-missing-path` - Add missing webhook paths
-- `typeversion-upgrade` - Upgrade to latest version
-- `version-migration` - Apply version migrations
+- `expression-format` - Fix missing `=` prefix in expressions
+- `typeversion-correction` - Downgrade unsupported typeVersions
+- `error-output-config` - Remove conflicting onError settings
+- `node-type-correction` - Fix unknown node types via similarity matching (90%+ confidence)
+- `webhook-missing-path` - Generate UUIDs for webhook nodes missing paths
+- `typeversion-upgrade` - Smart upgrade nodes to latest versions with auto-migration
+- `version-migration` - Guidance for complex breaking changes (manual steps)
+
+**Confidence Threshold**: `high` (90%+), `medium` (70-89%, default), `low` (any)
+
+**Post-update guidance**: Check `postUpdateGuidance` in the response for version upgrade migration steps.
 
 ---
 

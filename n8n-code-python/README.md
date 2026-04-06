@@ -133,7 +133,7 @@ This skill works with:
 
 ### n8n MCP Tools Expert
 - Use MCP tools to validate Code node configurations
-- Check node setup with `get_node_essentials`
+- Check node setup with `get_node`
 
 ### n8n Workflow Patterns
 - Code nodes fit into larger workflow patterns

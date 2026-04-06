@@ -45,11 +45,11 @@ Teaches how to use n8n-mcp MCP server tools correctly for efficient workflow bui
 - Validation profiles (minimal/runtime/ai-friendly/strict)
 - Smart parameters (branch, case for multi-output nodes)
 - Auto-sanitization system
-- Workflow management (15 operation types)
+- Workflow management (18 operation types)
 - AI connection types (8 types)
 
 ### Tool Categories
-- Node Discovery (search, list, essentials, info)
+- Node Discovery (search_nodes, get_node with detail levels and modes)
 - Configuration Validation (minimal, operation, workflow)
 - Workflow Management (create, update, validate)
 - Template Library (search, get)
@@ -61,7 +61,7 @@ Teaches how to use n8n-mcp MCP server tools correctly for efficient workflow bui
 1. **eval-001**: Tool selection (search_nodes)
 2. **eval-002**: nodeType format (nodes-base.* prefix)
 3. **eval-003**: Validation workflow (profiles)
-4. **eval-004**: essentials vs info (5KB vs 100KB)
+4. **eval-004**: standard vs full detail (1-2KB vs 3-8KB)
 5. **eval-005**: Smart parameters (branch, case)
 
 ## Key Features
@@ -84,7 +84,7 @@ Teaches how to use n8n-mcp MCP server tools correctly for efficient workflow bui
 ## What You'll Learn
 
 - Correct nodeType formats (nodes-base.* for search tools)
-- When to use get_node_essentials vs get_node_info
+- When to use get_node vs get_node({detail: "full"})
 - How to use validation profiles effectively
 - Smart parameters for multi-output nodes (IF/Switch)
 - Common tool usage patterns and workflows

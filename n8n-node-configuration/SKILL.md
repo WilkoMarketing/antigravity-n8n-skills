@@ -700,9 +700,34 @@ get_node({
 
 ---
 
+## Surgical Field Edits with patchNodeField
+
+When you need to edit a specific string inside a node field — rather than replacing the whole field — use `patchNodeField` in `n8n_update_partial_workflow`. This is especially useful for:
+
+- Editing code inside Code nodes without re-transmitting the full code block
+- Updating URLs or text in large HTML email templates
+- Fixing typos in JSON bodies or long text fields
+
+```javascript
+// Instead of replacing the entire jsCode field:
+n8n_update_partial_workflow({
+  id: "wf-123",
+  operations: [{
+    type: "patchNodeField",
+    nodeName: "Code",
+    fieldPath: "parameters.jsCode",
+    patches: [{find: "const limit = 10;", replace: "const limit = 50;"}]
+  }]
+})
+```
+
+`patchNodeField` is strict — it errors if the find string isn't found or matches multiple times (unless `replaceAll: true`). This prevents accidental silent failures during configuration updates. See the n8n MCP Tools Expert skill for full syntax and examples.
+
+---
+
 ## Best Practices
 
-### ✅ Do
+### Do
 
 1. **Start with get_node (standard detail)**
    - ~1-2K tokens response
