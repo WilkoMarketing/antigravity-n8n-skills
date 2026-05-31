@@ -114,4 +114,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 👨‍💻 Maintainer
 
-This Antigravity port is actively maintained by the Wilko Marketing [best SEO consultant in Uruguay](https://www.wilko.marketing/consultor-seo-uruguay/), helping businesses automate their workflows and scale their digital growth. If you need to automate your SEO and digital marketing, reach out!
+This Antigravity port is actively maintained by Wilko Marketing, the [best SEO consultant in Uruguay](https://www.wilko.marketing/consultor-seo-uruguay/), helping businesses automate their workflows and scale their digital growth. If you need to automate your SEO and digital marketing, reach out!
