@@ -1,6 +1,6 @@
 ---
 name: n8n-code-python
-description: Write Python code in n8n Code nodes. Use when writing Python in n8n, using _input/_json/_node syntax, working with standard library, or need to understand Python limitations in n8n Code nodes.
+description: Write Python code in n8n Code nodes. Use when writing Python in n8n, using _input/_json/_node syntax, working with standard library, or need to understand Python limitations in n8n Code nodes. Use this skill when the user specifically requests Python for an n8n Code node. Note — JavaScript is recommended for 95% of use cases — only use Python when the user explicitly prefers it or the task requires Python-specific standard library capabilities (regex, hashlib, statistics).
 ---
 
 # Python Code Node (Beta)
@@ -654,6 +654,32 @@ items = _input.all()
 print(f"Processing {len(items)} items")
 print(f"First item: {items[0] if items else 'None'}")
 ```
+
+---
+
+## Production Gotchas
+
+### SplitInBatches Loop Semantics
+
+The SplitInBatches node has two outputs:
+- `main[0]` = **done** — fires ONCE after all batches complete
+- `main[1]` = **each batch** — fires for every batch (the loop body)
+
+Always add a **Limit 1** node after the done output.
+
+### Correct Node Reference Syntax
+
+```python
+# ❌ WRONG
+data = _node['HTTP Request']['json']
+
+# ✅ CORRECT - call .first() then access json
+data = _node['HTTP Request'].first()['json']
+```
+
+### Cross-Iteration Data Not Available in Python
+
+`$getWorkflowStaticData('global')` may not be available in Python Beta mode. If you need to accumulate data across SplitInBatches iterations, use a JavaScript Code node for the accumulation logic instead.
 
 ---
 

@@ -358,6 +358,8 @@ return [{
 }];
 ```
 
+> ⚠️ **For authenticated APIs, don't extend this pattern.** `$helpers.httpRequestWithAuthentication` is blocked in the Code node sandbox (since n8n v2.0). Use an HTTP Request node with the credential attached, or delegate to a sub-workflow whose HTTP Request node holds the credential. See ERROR_PATTERNS.md Error #6.
+
 ### Example 4: Conditional Processing
 
 ```javascript

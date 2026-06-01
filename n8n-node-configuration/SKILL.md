@@ -1,6 +1,6 @@
 ---
 name: n8n-node-configuration
-description: Operation-aware node configuration guidance. Use when configuring nodes, understanding property dependencies, determining required fields, choosing between get_node detail levels, or learning common configuration patterns by node type.
+description: Operation-aware node configuration guidance. Use when configuring nodes, understanding property dependencies, determining required fields, choosing between get_node detail levels, or learning common configuration patterns by node type. Always use this skill when setting up node parameters — it explains which fields are required for each operation, how displayOptions control field visibility, and when to use patchNodeField for surgical edits vs full node updates.
 ---
 
 # n8n Node Configuration
@@ -616,6 +616,31 @@ get_node({
 });
 // Shows complete schema with operator-specific rules
 ```
+
+---
+
+## Node-Specific Configuration Notes
+
+### SplitInBatches v3
+
+```javascript
+{
+  "batchSize": 100,  // Number of items per batch
+  "options": {}
+}
+```
+
+**Output wiring**:
+- `main[0]` (done) → Connect to downstream processing (add Limit 1 first)
+- `main[1]` (each batch) → Connect to loop body, then loop back to SplitInBatches input
+
+See the n8n Workflow Patterns skill for detailed loop and nested loop patterns.
+
+### Google Sheets Node
+
+**Per-item execution**: Each input item triggers a separate API call. If you have 100 items and use a Google Sheets "Append Row" node, it makes 100 API calls. To write in bulk, aggregate items in a Code node first, then use a single HTTP Request with the Sheets API.
+
+**Formula columns**: Never use `append` on sheets with formula columns — it overwrites formulas. Instead, use HTTP Request with Google Sheets API `values.update` (PUT) method and a `googleApi` credential.
 
 ---
 

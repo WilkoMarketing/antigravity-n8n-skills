@@ -1,6 +1,6 @@
 ---
 name: n8n-expression-syntax
-description: Validate n8n expression syntax and fix common errors. Use when writing n8n expressions, using {{}} syntax, accessing $json/$node variables, troubleshooting expression errors, or working with webhook data in workflows.
+description: Validate n8n expression syntax and fix common errors. Use when writing n8n expressions, using {{}} syntax, accessing $json/$node variables, troubleshooting expression errors, mapping data between nodes, or referencing webhook data in workflows. Use this skill whenever configuring node fields that reference data from previous nodes — expressions are how n8n passes data between nodes, and getting the syntax wrong is the most common source of workflow errors.
 ---
 
 # n8n Expression Syntax
@@ -75,6 +75,11 @@ Access environment variables:
 {{$env.API_KEY}}
 {{$env.DATABASE_URL}}
 ```
+
+**Warning**: Some n8n instances have `N8N_BLOCK_ENV_ACCESS_IN_NODE` enabled, which blocks `$env` access entirely. If `$env` returns errors, use alternative approaches:
+- Store values in credentials instead
+- Use a Set node with manually entered values
+- Pass values through webhook query parameters
 
 ---
 
@@ -214,9 +219,9 @@ Expressions **must** be wrapped in double curly braces.
 ✅ {{$json.field}}
 ```
 
-### 2. Use Quotes for Spaces
+### 2. Use Quotes for Spaces and Special Characters
 
-Field or node names with spaces require **bracket notation**:
+Field or node names with spaces, diacritics, or special characters require **bracket notation**:
 
 ```javascript
 ❌ {{$json.field name}}
@@ -224,6 +229,10 @@ Field or node names with spaces require **bracket notation**:
 
 ❌ {{$node.HTTP Request.json}}
 ✅ {{$node["HTTP Request"].json}}
+
+// Bracket notation is mandatory for keys with special characters
+✅ {{$json['Gross Price w/o shipment']}}
+✅ {{$json['Cena brutto zł']}}
 ```
 
 ### 3. Match Exact Node Names

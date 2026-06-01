@@ -436,6 +436,112 @@ const result = n8n_deploy_template({
 
 ---
 
+## n8n_generate_workflow (NATURAL LANGUAGE → WORKFLOW)
+
+**Speed**: Proposals ~2s, fresh generation 5–15s, deploy ~3s
+
+**Use when**: User describes the workflow in plain English and wants the system to draft (and optionally deploy) it.
+
+> ⚠️ **Hosted-only feature.** On self-hosted instances the tool returns `{hosted_only: true}` with a redirect message rather than a workflow. For self-hosted, use `n8n_deploy_template` (templates) or `n8n_create_workflow` (manual).
+
+### How It Works
+
+It's a **multi-step flow with a review checkpoint** — proposals/preview are returned first, deployment requires a second call. This avoids deploying low-quality drafts.
+
+### Path A: Proposals → Deploy (default, recommended)
+
+```javascript
+// Step 1: Generate proposals (NOT deployed, returns up to 5 candidates)
+n8n_generate_workflow({
+  description: "Slack daily standup reminder at 9am every weekday"
+})
+// → {
+//     status: "proposals",
+//     proposals: [
+//       {
+//         id: "uuid-1",
+//         name: "Daily Standup Reminder",
+//         description: "...",
+//         flow_summary: "Schedule trigger → Slack message",
+//         credentials_needed: ["slackApi"]
+//       },
+//       ...
+//     ]
+//   }
+
+// Step 2: Deploy the proposal you picked
+n8n_generate_workflow({
+  description: "Slack daily standup reminder at 9am every weekday",
+  deploy_id: "uuid-1"
+})
+// → { status: "deployed", workflow_id, workflow_name, workflow_url,
+//     node_count, node_summary }
+```
+
+### Path B: Skip Cache → Preview → Confirm
+
+Use when none of the proposals match what you want.
+
+```javascript
+// Step 1: Bypass proposals; get a fresh preview (NOT deployed)
+n8n_generate_workflow({
+  description: "Webhook receives JSON, transforms it, POSTs to a REST API",
+  skip_cache: true
+})
+// → { status: "preview", ... }
+
+// Step 2: Deploy the preview
+n8n_generate_workflow({
+  description: "Webhook receives JSON, transforms it, POSTs to a REST API",
+  confirm_deploy: true
+})
+// → { status: "deployed", ... }
+```
+
+### Writing a Good Description
+
+The quality of the generated workflow is bound by the clarity of the description. Always include:
+
+- **Trigger type**: `webhook`, `schedule` (with cadence — "every 15 min", "weekdays at 9am"), `manual`, `form`, `chat`
+- **Services involved**: name them explicitly (Slack, Gmail, HubSpot, Postgres, etc.) — generic terms ("a chat tool") yield generic results
+- **Logic / flow**: branches, transforms, aggregation, deduplication, retry behavior
+
+**Bad**: `"Send a notification when something happens"`
+
+**Good**: `"When a new row is added to the 'leads' Postgres table, enrich it with Clearbit, then post a summary to the #sales Slack channel. Skip rows where 'company' is empty."`
+
+### Parameters
+
+| Parameter | Type | Use |
+|-----------|------|-----|
+| `description` | string (required) | Natural-language description |
+| `deploy_id` | string | ID of a proposal from a prior call — deploys it |
+| `skip_cache` | boolean | Skip proposals; generate from scratch and return a preview |
+| `confirm_deploy` | boolean | Deploy the most recent preview from this session |
+
+### Common Pitfalls
+
+- **Hosted-only** — on self-hosted, no workflow is generated; fall back to `n8n_deploy_template` or `n8n_create_workflow`
+- **Proposals are NOT deployed** — until you call again with `deploy_id` or `confirm_deploy`, nothing exists in n8n
+- **Inactive on deploy** — generated workflows are created in **inactive** state; credentials must be configured in the n8n UI before activation
+- **Per-session state** — pending proposals/preview live in MCP-session state; reconnecting loses them, and you'll need to re-issue the description
+
+### Recommended Follow-Up
+
+Always validate after deploying:
+```javascript
+n8n_generate_workflow({description: "...", deploy_id: "uuid-1"})
+// → workflow_id: "abc"
+
+n8n_validate_workflow({id: "abc"})
+// → catches any node-version or connection issues the generator missed
+
+// If issues found, n8n_autofix_workflow can resolve common ones
+n8n_autofix_workflow({id: "abc", applyFixes: true})
+```
+
+---
+
 ## n8n_workflow_versions (VERSION CONTROL)
 
 **Use when**: Managing workflow history, rollback, cleanup
@@ -538,6 +644,8 @@ n8n_test_workflow({
 5. `delete` - Permanently delete credential by ID
 6. `getSchema` - Discover required fields for a credential type
 
+`list` and `get` also accept an optional `includeUsage: true` flag that attaches workflow-usage info to each credential (see "Find Which Workflows Use a Credential" below).
+
 ### List Credentials
 ```javascript
 n8n_manage_credentials({action: "list"})
@@ -551,11 +659,54 @@ n8n_manage_credentials({action: "get", id: "123"})
 // Falls back to list+filter if GET returns 403/405
 ```
 
+### Find Which Workflows Use a Credential
+n8n's public API has no native "which workflows use credential X" endpoint, so n8n-mcp builds the reverse index for you by scanning workflows client-side. Pass `includeUsage: true` to either `list` or `get`.
+
+```javascript
+// Every credential, with the workflows that reference it
+n8n_manage_credentials({action: "list", includeUsage: true})
+// → {
+//     credentials: [
+//       {
+//         id: "123",
+//         name: "Production Slack",
+//         type: "slackApi",
+//         createdAt: "...", updatedAt: "...",
+//         usedIn: [
+//           {id: "wf_abc", name: "Daily digest",  active: true},
+//           {id: "wf_xyz", name: "Alert fan-out", active: false}
+//         ],
+//         usageCount: 2
+//       },
+//       ...
+//     ],
+//     count: N,
+//     // usageScanError: "..."  // present only if the workflow scan failed
+//   }
+
+// One credential, with its workflow references
+n8n_manage_credentials({action: "get", id: "123", includeUsage: true})
+// → Same shape as `get` plus usedIn and usageCount.
+//   On scan failure: response sets usageScanError and omits usedIn/usageCount.
+```
+
+**When to use it:**
+- Before `delete`: confirm nothing references the credential
+- Before rotating a secret with `update`: see exactly which workflows you'll affect
+- After `n8n_audit_instance` flags a credential: locate the workflows that need remediation
+
+**Behavior and limits:**
+- The reverse index is built client-side, deduplicated per workflow, and capped at 5000 workflows (same ceiling as `n8n_audit_instance`)
+- Archived workflows are excluded by n8n's API — a "no usages" result does **not** prove a credential is unused; verify before destructive actions
+- Triggers one full workflow scan per call. On large instances expect slower responses than the base ~50–500ms — budget accordingly when calling repeatedly
+- If the scan fails, the response degrades to base credentials with a `usageScanError` field rather than failing the whole call
+- Default behavior unchanged: omit the flag and no extra API calls happen
+
 ### Discover Schema
 ```javascript
 n8n_manage_credentials({
   action: "getSchema",
-  credentialType: "httpHeaderAuth"
+  type: "httpHeaderAuth"
 })
 // → Required fields, types, descriptions for this credential type
 ```
@@ -593,7 +744,7 @@ n8n_manage_credentials({action: "delete", id: "123"})
 // 1. Discover what fields are needed
 n8n_manage_credentials({
   action: "getSchema",
-  credentialType: "slackApi"
+  type: "slackApi"
 })
 
 // 2. Create the credential
@@ -608,10 +759,28 @@ n8n_manage_credentials({
 n8n_manage_credentials({action: "list"})
 ```
 
+### Typical Workflow: Safely Delete or Rotate a Credential
+```javascript
+// 1. Check what would break
+n8n_manage_credentials({action: "get", id: "123", includeUsage: true})
+// → Inspect usedIn — the {id, name, active} of every workflow that references it
+
+// 2a. If nothing depends on it, delete
+n8n_manage_credentials({action: "delete", id: "123"})
+
+// 2b. If something does, rotate the secret instead and notify owners
+n8n_manage_credentials({
+  action: "update",
+  id: "123",
+  data: {accessToken: "xoxb-new-..."}
+})
+```
+
 ### Security Notes
 - **Response stripping**: `get`, `create`, and `update` all strip the `data` field from responses (defense-in-depth — secrets are never returned)
 - **Log redaction**: Credential request bodies are redacted from debug logs
 - **Fallback resilience**: `get` falls back to list+filter when `GET /credentials/:id` returns 403/405 (endpoint not in all n8n versions)
+- **Usage scan resilience**: when `includeUsage: true` triggers a workflow scan that fails, the response includes `usageScanError` and still returns the base credentials rather than erroring out
 
 ---
 

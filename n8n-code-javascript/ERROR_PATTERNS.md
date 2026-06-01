@@ -637,6 +637,112 @@ const timeout = $json.settings?.advanced?.timeout ?? 30000;
 
 ---
 
+## Error #6: UnsupportedFunctionError (Auth Helpers Blocked)
+
+**Frequency**: The most common "this worked yesterday in old n8n" error after upgrading to v2.0+
+
+**What Happens**:
+- Error: `UnsupportedFunctionError: The function "helpers.httpRequestWithAuthentication" is not supported in the Code Node`
+- Same for `helpers.requestWithAuthenticationPaginated`
+- Throws on execution, not on save
+
+### The Problem
+
+Since n8n v2.0, Code nodes execute in the **task runner sandbox** which deliberately blocks the auth helpers. The legacy vm2 sandbox used to bind them, which is why old forum posts and tutorials show them working. n8n's source comment explains why: the Code node has no credential of its own, so the helper had nothing to authenticate against — it was always semantically broken, just not always loud about it.
+
+```javascript
+// ❌ BLOCKED in task runner sandbox (default since v2.0)
+const data = await $helpers.httpRequestWithAuthentication.call(
+  this,
+  'baseLinkerApi',
+  { url: '...', method: 'POST' }
+);
+```
+
+### The Solution
+
+There is **no env flag** to re-enable these in the runner — the deny-list is compiled-in. Pick one of:
+
+**Option A — Replace the Code node with an HTTP Request node** (best):
+
+The HTTP Request node natively supports credential attachment with full expression support for URL/body/headers. Most "Code-node-makes-an-API-call" patterns are leftovers from before HTTP Request had pagination and expression support.
+
+**Option B — Sub-workflow with HTTP Request node** (when you need code-level logic before/after):
+
+```javascript
+// Parent Code node — prepare payloads, then delegate
+return $input.all().map(i => ({ json: {
+  url: 'https://api.example.com/things',
+  method: 'POST',
+  body: { sku: i.json.sku }
+}}));
+```
+
+Then wire to **Execute Workflow** → child workflow with **Execute Workflow Trigger** → **HTTP Request** node using `={{ $json.url }}`, `={{ $json.body }}`, with the credential attached natively.
+
+**Option C — Token as runtime data** (only when the token genuinely flows through the workflow):
+
+```javascript
+// ✅ Works — manual auth header, token came from upstream
+const token = $('Get Token').first().json.access_token;
+
+const data = await $helpers.httpRequest({
+  url: 'https://api.example.com/data',
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+```
+
+### Decision Guide
+
+| Need | Use |
+|------|-----|
+| Single authenticated API call | HTTP Request node directly |
+| Many API calls + pre/post processing | Sub-workflow pattern (Option B) |
+| Token already in the data flow | Manual `$helpers.httpRequest()` with header |
+| `httpRequestWithAuthentication` | **Doesn't work — pick A, B, or C above** |
+
+---
+
+## Error #7: $env is not defined / Cannot access $env
+
+**Frequency**: Common in hardened production instances
+
+**What Happens**:
+- Error: `$env is not defined` or `ReferenceError: $env is not defined`
+- Code looks correct, runs fine on dev instance, throws in production
+
+### The Problem
+
+`$env` access is gated by the **`N8N_BLOCK_ENV_ACCESS_IN_NODE`** environment variable. When set to `true` (a common production hardening setting), `$env` is removed from the Code node sandbox entirely. This is increasingly the default in security-conscious deployments.
+
+```javascript
+// ❌ Throws if N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+const apiKey = $env.API_KEY;
+```
+
+### The Solution
+
+Treat secrets as a **credential concern**, not a Code-node concern:
+
+```javascript
+// ✅ Token arrives as data from an upstream node that used a credential
+const apiKey = $('Set Secret').first().json.apiKey;
+
+// Or: secret was attached server-side by an HTTP Request node with the credential
+// — your Code node never sees the raw secret, which is the whole point
+```
+
+For values you genuinely need to inject from outside the workflow (config, not secrets), use:
+- A **Set** node at the top of the workflow with hardcoded constants, or
+- An **n8n credential** referenced by an HTTP Request node, or
+- The **External Secrets** integration (`$secrets`) if your edition supports it.
+
+### Why This Matters
+
+Skills and tutorials written before 2024 routinely use `$env.API_KEY` because it was the path of least resistance. Modern n8n setups block it because letting Code nodes read arbitrary env vars is a privilege escalation surface — any user with workflow-edit access could exfiltrate `DB_PASSWORD`, `N8N_ENCRYPTION_KEY`, etc. Don't fight the restriction; route secrets through credentials.
+
+---
+
 ## Error Prevention Checklist
 
 Use this checklist before deploying Code nodes:
@@ -684,6 +790,9 @@ Use this checklist before deploying Code nodes:
 | "Cannot read property X of undefined" | Missing null check | Use optional chaining `?.` |
 | "Cannot read property X of null" | Null value access | Add guard clause or default |
 | "Unmatched expression brackets" | Quote/bracket imbalance | Check string escaping |
+| "UnsupportedFunctionError ... httpRequestWithAuthentication" | Auth helper blocked in task runner | Use HTTP Request node + credential, or sub-workflow pattern (Error #6) |
+| "$env is not defined" | `N8N_BLOCK_ENV_ACCESS_IN_NODE=true` | Route secrets through credentials, not `$env` (Error #7) |
+| "Cannot find module 'crypto'" | `require()` allowlist not set | Move logic out of Code node, or set `N8N_RUNNERS_ALLOWED_BUILT_IN_MODULES` |
 
 ---
 
@@ -743,12 +852,14 @@ console.log('Input structure:', JSON.stringify(items[0], null, 2));
 
 ## Summary
 
-**Top 5 Errors to Avoid**:
+**Top 7 Errors to Avoid**:
 1. **Empty code / missing return** (38%) - Always return data
 2. **Expression syntax `{{ }}`** (8%) - Use JavaScript, not expressions
 3. **Wrong return format** (5%) - Always `[{json: {...}}]`
 4. **Unmatched brackets** (6%) - Escape strings properly
 5. **Missing null checks** - Use optional chaining `?.`
+6. **`httpRequestWithAuthentication` blocked** - Use HTTP Request node + credential
+7. **`$env` blocked** - Route secrets through credentials, not env access
 
 **Quick Prevention**:
 - Return `[{json: {...}}]` format

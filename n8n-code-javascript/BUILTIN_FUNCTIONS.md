@@ -8,12 +8,52 @@ Complete reference for n8n's built-in JavaScript functions and helpers.
 
 n8n Code nodes provide powerful built-in functions beyond standard JavaScript. This guide covers:
 
-1. **$helpers.httpRequest()** - Make HTTP requests
-2. **DateTime (Luxon)** - Advanced date/time operations
-3. **$jmespath()** - Query JSON structures
-4. **$getWorkflowStaticData()** - Persistent storage
-5. **Standard JavaScript Globals** - Math, JSON, console, etc.
-6. **Available Node.js Modules** - crypto, Buffer, URL
+1. **Sandbox restrictions** - What's blocked and why (READ FIRST)
+2. **$helpers.httpRequest()** - Make HTTP requests
+3. **DateTime (Luxon)** - Advanced date/time operations
+4. **$jmespath()** - Query JSON structures
+5. **$getWorkflowStaticData()** - Persistent storage
+6. **Standard JavaScript Globals** - Math, JSON, console, etc.
+7. **Available Node.js Modules** - crypto, Buffer, URL
+
+---
+
+## 0. Sandbox Restrictions (Critical)
+
+Since n8n v2.0, Code nodes execute inside a **task runner sandbox** (`JsTaskRunnerSandbox`) which deliberately blocks several APIs. The legacy vm2 sandbox is being removed. Knowing what's blocked saves hours of "why does this throw on activation but not in the editor preview."
+
+### Blocked helpers
+
+```javascript
+// ❌ BLOCKED — throws UnsupportedFunctionError
+await $helpers.httpRequestWithAuthentication.call(this, 'credType', { ... });
+await $helpers.requestWithAuthenticationPaginated.call(this, { ... }, 'credType');
+```
+
+n8n's source comment explains why: *"these rely on checking the credentials from the current node type (Code Node), and Code Node doesn't have credentials."* There is **no env var to re-enable them** in the task runner — the deny-list is compiled-in (`packages/@n8n/task-runner/src/runner-types.ts`).
+
+**Workaround**: don't try to authenticate from inside a Code node. Instead, either:
+- Replace the Code node with an HTTP Request node that has the credential attached (the canonical pattern), or
+- Have the Code node prepare a payload and delegate to a sub-workflow whose HTTP Request node holds the credential.
+
+### `$env` may be blocked
+
+`$env` is gated by **`N8N_BLOCK_ENV_ACCESS_IN_NODE`**. When set to `true` (a common production hardening), any reference to `$env.SOMETHING` throws. Since you can't tell from inside the Code node whether it's enabled, **don't rely on `$env` for portable skills** — treat secrets as a credential concern (HTTP Request node) rather than a Code-node concern.
+
+### `require()` is gated by allowlists
+
+```javascript
+// May throw "Cannot find module 'crypto'" — depends on env vars
+const crypto = require('crypto');
+```
+
+Built-in modules need `N8N_RUNNERS_ALLOWED_BUILT_IN_MODULES` (or legacy `NODE_FUNCTION_ALLOW_BUILTIN`) set to `*` or a comma-list including `crypto`. External npm packages need `N8N_RUNNERS_ALLOWED_EXTERNAL_MODULES` plus the package being installed in the runner image. On default installs neither is set — `require()` throws.
+
+`Buffer` and `URL` are globals (not `require`'d), so they always work.
+
+### What's always safe
+
+`$input.*`, `$json`, `$node[…]`, `$helpers.httpRequest()` (without auth), `$jmespath()`, `$getWorkflowStaticData()`, `DateTime` (Luxon), and all standard JavaScript globals (`Math`, `JSON`, `Object`, `Array`, `console`, `Buffer`, `URL`, `URLSearchParams`).
 
 ---
 
@@ -89,12 +129,18 @@ return [{json: results}];
 
 ```javascript
 // POST with JSON body
+// NOTE: For authenticated APIs, prefer an HTTP Request node with a credential
+// attached. Embedding the token in a Code node only works when (a) the token
+// arrives as runtime data (e.g. from a previous node), or (b) you're sure
+// $env access is enabled on this instance. See section 0.
+const apiToken = $input.first().json.apiToken;  // passed in from a credential-aware upstream node
+
 const newUser = await $helpers.httpRequest({
   method: 'POST',
   url: 'https://api.example.com/users',
   headers: {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer ' + $env.API_KEY
+    'Authorization': `Bearer ${apiToken}`
   },
   body: {
     name: $json.body.name,
@@ -130,7 +176,7 @@ await $helpers.httpRequest({
   method: 'DELETE',
   url: `https://api.example.com/users/${userId}`,
   headers: {
-    'Authorization': 'Bearer ' + $env.API_KEY
+    'Authorization': `Bearer ${apiToken}`  // token passed in from upstream node, not $env
   }
 });
 
@@ -139,22 +185,24 @@ return [{json: {deleted: true, userId}}];
 
 ### Authentication Patterns
 
+> **Strong preference**: don't authenticate from inside a Code node. Use an HTTP Request node with a credential attached, or delegate to a sub-workflow whose HTTP Request node holds the credential. The patterns below only apply when the token genuinely flows through the workflow as data.
+
 ```javascript
-// Bearer Token
+// Bearer Token (token came from a previous node, not $env)
 const response = await $helpers.httpRequest({
   url: 'https://api.example.com/data',
   headers: {
-    'Authorization': `Bearer ${$env.API_TOKEN}`
+    'Authorization': `Bearer ${$input.first().json.token}`
   }
 });
 ```
 
 ```javascript
-// API Key in Header
+// API Key in Header (key came from a previous node, not $env)
 const response = await $helpers.httpRequest({
   url: 'https://api.example.com/data',
   headers: {
-    'X-API-Key': $env.API_KEY
+    'X-API-Key': $input.first().json.apiKey
   }
 });
 ```
@@ -671,6 +719,8 @@ return [{
 
 ### crypto Module
 
+> **Gated**: `require('crypto')` only works if `N8N_RUNNERS_ALLOWED_BUILT_IN_MODULES` (or legacy `NODE_FUNCTION_ALLOW_BUILTIN`) includes `crypto` (or is `*`). On default installs it throws "Cannot find module 'crypto'". For hashing you control, prefer doing it before reaching the Code node, or — if you must — verify your instance's config first.
+
 ```javascript
 const crypto = require('crypto');
 
@@ -732,14 +782,25 @@ return [{
 
 ## What's NOT Available
 
-**External npm packages are NOT available:**
+**External npm packages are NOT available** (unless explicitly allowlisted via `N8N_RUNNERS_ALLOWED_EXTERNAL_MODULES` *and* installed in the runner image — rare):
 - ❌ axios
 - ❌ lodash
 - ❌ moment (use DateTime/Luxon instead)
 - ❌ request
 - ❌ Any other npm package
 
-**Workaround**: Use $helpers.httpRequest() for HTTP, or add data to workflow via HTTP Request node.
+**Authentication helpers are blocked** in the task runner sandbox (see section 0):
+- ❌ `$helpers.httpRequestWithAuthentication`
+- ❌ `$helpers.requestWithAuthenticationPaginated`
+
+**Conditionally blocked** (depends on instance config):
+- ⚠️ `$env.*` — blocked when `N8N_BLOCK_ENV_ACCESS_IN_NODE=true`
+- ⚠️ `require('crypto')` / `require('fs')` / etc. — blocked unless `N8N_RUNNERS_ALLOWED_BUILT_IN_MODULES` includes them
+
+**Workarounds**:
+- HTTP with auth → HTTP Request node with credential attached, or sub-workflow pattern
+- Secrets → arrive as data from an upstream HTTP Request / credential-aware node
+- Hashing/crypto → do it in a service the workflow calls, or get your instance config updated
 
 ---
 

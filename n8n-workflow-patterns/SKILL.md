@@ -1,6 +1,6 @@
 ---
 name: n8n-workflow-patterns
-description: Proven workflow architectural patterns from real n8n workflows. Use when building new workflows, designing workflow structure, choosing workflow patterns, planning workflow architecture, or asking about webhook processing, HTTP API integration, database operations, AI agent workflows, or scheduled tasks.
+description: Proven workflow architectural patterns from real n8n workflows. Use when building new workflows, designing workflow structure, choosing workflow patterns, planning workflow architecture, or asking about webhook processing, HTTP API integration, database operations, AI agent workflows, batch processing, or scheduled tasks. Always consult this skill when the user asks to create, build, or design an n8n workflow, automate a process, or connect services — even if they don't explicitly mention 'patterns'. Covers webhook, API, database, AI, batch processing, and scheduled automation architectures.
 ---
 
 # n8n Workflow Patterns
@@ -9,7 +9,7 @@ Proven architectural patterns for building n8n workflows.
 
 ---
 
-## The 5 Core Patterns
+## The 6 Core Patterns
 
 Based on analysis of real workflow usage:
 
@@ -32,6 +32,10 @@ Based on analysis of real workflow usage:
 5. **[Scheduled Tasks](scheduled_tasks.md)**
    - Recurring automation workflows
    - Pattern: Schedule → Fetch → Process → Deliver → Log
+
+6. **Batch Processing** (below)
+   - Process large datasets in chunks with API rate limits
+   - Pattern: Prepare → SplitInBatches → Process per batch → Accumulate → Aggregate
 
 ---
 
@@ -68,6 +72,12 @@ Based on analysis of real workflow usage:
 - Periodic data fetching
 - Maintenance tasks
 - Example: "Daily: Fetch analytics → Generate report → Email team"
+
+**Batch Processing** - Use when:
+- Processing large datasets that exceed API batch limits
+- Need to accumulate results across multiple API calls
+- Nested loops (e.g., multiple categories × paginated API calls per category)
+- Example: "Fetch products for 4 markets × 1000 per API call → Aggregate all results"
 
 ---
 
@@ -173,6 +183,96 @@ Main Flow → [Success Path]
          └→ [Error Trigger → Error Handler]
 ```
 **Use when**: Need separate error handling workflow
+
+---
+
+## Batch Processing Pattern
+
+### SplitInBatches Loop
+
+The SplitInBatches node splits a large dataset into smaller chunks for processing. Understanding its outputs is critical:
+
+- `main[0]` = **done** — fires ONCE after all batches complete
+- `main[1]` = **each batch** — fires per batch (this is the loop body)
+
+```
+Prepare Items → SplitInBatches → [main[1]: Process Batch] → (loops back)
+                                  [main[0]: Done] → Limit 1 → Aggregate
+```
+
+Always add a **Limit 1** node after the done output.
+
+### Cross-Iteration Data
+
+After the loop, `$('Node Inside Loop').all()` returns **ONLY the last batch's items**. To accumulate across all iterations, use `$getWorkflowStaticData('global')` in a Code node inside the loop. See the n8n Code JavaScript skill for the full pattern.
+
+### Nested Loops
+
+When processing N categories × M items per category (where an API has a batch limit):
+
+```
+Define Categories (N items)
+  → Outer Loop (SplitInBatches, batchSize=1)
+    → Prepare category data
+    → Inner Loop (SplitInBatches, batchSize=1000)
+      → API Call → Verify → (loops back to Inner Loop via main[1])
+    → Inner done[0] → Rate Limit Delay → back to Outer Loop
+  → Outer done[0] → Limit 1 → Final Aggregate
+```
+
+**Wiring gotcha**: The inner done[0] must connect back to the OUTER loop input, not to the aggregate. The outer done[0] feeds the final aggregate.
+
+### API Pagination
+
+For APIs without multi-ID filtering, use `id_from` + date windowing for efficient pagination:
+
+```
+Schedule → Set Date Window → Fetch Page → Process
+  → IF has more? → [true] Update id_from → Fetch Page (loop)
+                  → [false] → Aggregate → Output
+```
+
+### Dry-Run / Verification Tolerance
+
+When testing with API write nodes disabled (for dry runs), downstream verification nodes receive the request body instead of the response. Make verification tolerant:
+
+```javascript
+// In verification Code node
+const body = $input.first().json;
+const looksLikeRequest = body.method && body.parameters && !body.status;
+if (looksLikeRequest) {
+  return [{ json: { status: 'SKIPPED', message: 'Upstream disabled for testing' }}];
+}
+// Normal response verification below...
+```
+
+---
+
+## Integration-Specific Gotchas
+
+### Google Sheets
+
+- **NEVER use `append`** on sheets with formula columns — it breaks formulas. Use Google Sheets API `values.update` (PUT) via HTTP Request node with a `googleApi` credential
+- **Write numbers, not strings** for formula-dependent columns — string "4.98" breaks `ADD()` formulas. Use `parseFloat()` in a Code node
+- **Per-item execution trap**: Google Sheets nodes execute once per input item. If you need a single bulk write, aggregate items into one in a Code node first
+- **UNFORMATTED_VALUE returns numbers**, not text like "N/A" — filter explicitly in Code nodes
+
+### Google Drive
+
+- **`convertToGoogleDocument: true` creates a Google Doc (text)**, NOT a Google Sheet — to upload a CSV for download, omit this option entirely
+- **CSV download link format**: `https://drive.google.com/uc?id={fileId}&export=download` — use instead of `/view` links
+
+### Bidirectional Threshold Checking
+
+When comparing values (prices, quantities, metrics), always check both directions:
+
+```javascript
+// ❌ Only catches increases
+if (diff > threshold) { flag(); }
+
+// ✅ Catches both spikes AND crashes — both are data-quality signals
+if (Math.abs(diff) > threshold) { flag(); }
+```
 
 ---
 
@@ -392,7 +492,7 @@ Use `search_templates` and `get_template` from n8n-mcp tools to find examples!
 ## Summary
 
 **Key Points**:
-1. **5 core patterns** cover 90%+ of workflow use cases
+1. **6 core patterns** cover 90%+ of workflow use cases
 2. **Webhook processing** is the most common pattern
 3. Use the **workflow creation checklist** for every workflow
 4. **Plan pattern** → **Select nodes** → **Build** → **Validate** → **Deploy**

@@ -1,6 +1,6 @@
 ---
 name: n8n-mcp-tools-expert
-description: Expert guide for using n8n-mcp MCP tools effectively. Use when searching for nodes, validating configurations, accessing templates, managing workflows, managing credentials, auditing instance security, or using any n8n-mcp tool. Provides tool selection guidance, parameter formats, and common patterns.
+description: Expert guide for using n8n-mcp MCP tools effectively. Use when searching for nodes, validating configurations, accessing templates, managing workflows, managing credentials, auditing instance security, or using any n8n-mcp tool. Provides tool selection guidance, parameter formats, and common patterns. IMPORTANT — Always consult this skill before calling any n8n-mcp tool — it prevents common mistakes like wrong nodeType formats, incorrect parameter structures, and inefficient tool usage. If the user mentions n8n, workflows, nodes, or automation and you have n8n MCP tools available, use this skill first.
 ---
 
 # n8n MCP Tools Expert
@@ -17,10 +17,11 @@ n8n-mcp provides tools organized into categories:
 2. **Configuration Validation** → [VALIDATION_GUIDE.md](VALIDATION_GUIDE.md)
 3. **Workflow Management** → [WORKFLOW_GUIDE.md](WORKFLOW_GUIDE.md)
 4. **Template Library** - Search and deploy 2,700+ real workflows
-5. **Data Tables** - Manage n8n data tables and rows (`n8n_manage_datatable`)
-6. **Credential Management** - Full credential CRUD + schema discovery (`n8n_manage_credentials`)
-7. **Security & Audit** - Instance security auditing with custom deep scan (`n8n_audit_instance`)
-8. **Documentation & Guides** - Tool docs, AI agent guide, Code node guides
+5. **Workflow Generation** - Natural-language → workflow with proposal review (`n8n_generate_workflow`, hosted-only)
+6. **Data Tables** - Manage n8n data tables and rows (`n8n_manage_datatable`)
+7. **Credential Management** - Full credential CRUD + schema discovery (`n8n_manage_credentials`)
+8. **Security & Audit** - Instance security auditing with custom deep scan (`n8n_audit_instance`)
+9. **Documentation & Guides** - Tool docs, AI agent guide, Code node guides
 
 ---
 
@@ -37,6 +38,7 @@ n8n-mcp provides tools organized into categories:
 | `n8n_update_partial_workflow` | Editing workflows (MOST USED!) | 50-200ms |
 | `validate_workflow` | Checking complete workflow | 100-500ms |
 | `n8n_deploy_template` | Deploy template to n8n instance | 200-500ms |
+| `n8n_generate_workflow` | NL → workflow (proposals → deploy), hosted-only | 2-15s |
 | `n8n_manage_datatable` | Managing data tables and rows | 50-500ms |
 | `n8n_manage_credentials` | Credential CRUD + schema discovery | 50-500ms |
 | `n8n_audit_instance` | Security audit (built-in + custom scan) | 500-5000ms |
@@ -259,6 +261,51 @@ n8n_update_partial_workflow({id, operations: [...]})
 }
 ```
 
+### Mistake 7: Wrong Parameter Name for updateNode
+
+**Problem**: Using `parameters` instead of `updates`
+
+```javascript
+// WRONG
+n8n_update_partial_workflow({
+  id: "wf-123",
+  operations: [{
+    type: "updateNode",
+    nodeName: "HTTP Request",
+    parameters: {url: "..."}  // ❌ Wrong key
+  }]
+})
+
+// CORRECT
+n8n_update_partial_workflow({
+  id: "wf-123",
+  operations: [{
+    type: "updateNode",
+    nodeName: "HTTP Request",
+    updates: {url: "..."}  // ✅ Correct key
+  }]
+})
+```
+
+### Mistake 8: Wrong Credential Attachment Format
+
+**Problem**: Credentials not attaching to nodes
+
+```javascript
+// WRONG - credentials as flat object
+updates: {credentials: "myApiKey"}
+
+// CORRECT - credentials nested by type with id and name
+updates: {
+  credentials: {
+    httpHeaderAuth: {
+      id: "abc123",
+      name: "My API Key"
+    }
+  }
+}
+```
+
 ### Mistake 6: Not Using intent Parameter
 
 **Problem**: Less helpful tool responses
@@ -457,6 +504,68 @@ n8n_deploy_template({
 
 ---
 
+## Workflow Generation
+
+### n8n_generate_workflow
+
+Generates an n8n workflow from a natural-language description via a multi-step flow with a review checkpoint. **Hosted-only** — self-hosted instances receive a redirect message rather than a workflow.
+
+**Two paths:**
+
+**Path A — pick a proposal** (default; cheapest, recommended):
+```javascript
+// Step 1: Get up to 5 proposals (NOT deployed)
+n8n_generate_workflow({
+  description: "Send a Slack message every morning at 9am with a daily standup reminder"
+})
+// → { status: "proposals", proposals: [{id, name, description, flow_summary, credentials_needed}, ...] }
+
+// Step 2: Deploy the proposal you want
+n8n_generate_workflow({
+  description: "Send a Slack message every morning at 9am with a daily standup reminder",
+  deploy_id: "uuid-from-proposals"
+})
+// → { status: "deployed", workflow_id, workflow_name, workflow_url, node_count, node_summary }
+```
+
+**Path B — fresh generation** (when no proposal fits):
+```javascript
+// Step 1: Skip the proposal cache, get a preview (NOT deployed)
+n8n_generate_workflow({
+  description: "Webhook → transform JSON → POST to REST API",
+  skip_cache: true
+})
+// → { status: "preview", ... }
+
+// Step 2: Deploy the preview
+n8n_generate_workflow({
+  description: "Webhook → transform JSON → POST to REST API",
+  confirm_deploy: true
+})
+// → { status: "deployed", ... }
+```
+
+**Description tips** (more specific = better results):
+- Trigger type: webhook, schedule (with cadence), manual, form, chat
+- Services to integrate: name them (Slack, Gmail, Postgres, etc.)
+- Logic/flow: what transforms, branches, or aggregations are needed
+
+**Caveats:**
+- **Hosted-only** — on self-hosted, the response is `{hosted_only: true, ...}` with a redirect message
+- Generated workflows are deployed in **inactive** state — credentials must be configured in the n8n UI before activation
+- Proposals/preview live in per-MCP-session state; switching sessions loses pending state
+- Always run `n8n_validate_workflow({id})` after deployment to catch any issues
+- For self-hosted instances, fall back to `n8n_deploy_template` (curated templates) or `n8n_create_workflow` (full control)
+
+**When to use which:**
+| Goal | Tool |
+|------|------|
+| Pick from a curated 2,700+ template library | `n8n_deploy_template` |
+| Describe what you want in plain English (hosted only) | `n8n_generate_workflow` |
+| Build node-by-node with full control | `n8n_create_workflow` |
+
+---
+
 ## Data Table Management
 
 ### n8n_manage_datatable
@@ -528,9 +637,11 @@ n8n_manage_datatable({
 
 ### n8n_manage_credentials
 
-Unified tool for managing n8n credentials. Supports full CRUD operations and schema discovery.
+Unified tool for managing n8n credentials. Supports full CRUD operations, schema discovery, and reverse-lookup of which workflows use each credential.
 
 **Actions**: `list`, `get`, `create`, `update`, `delete`, `getSchema`
+
+**Optional flag**: `includeUsage` (boolean, default `false`) — on `list` and `get`, attaches a `usedIn: [{id, name, active}]` array and `usageCount` to every credential by reverse-scanning workflows. Default behavior is unchanged when omitted.
 
 ```javascript
 // List all credentials
@@ -542,7 +653,7 @@ n8n_manage_credentials({action: "get", id: "123"})
 // → Returns: credential metadata (data field stripped for security)
 
 // Discover required fields for a credential type
-n8n_manage_credentials({action: "getSchema", credentialType: "httpHeaderAuth"})
+n8n_manage_credentials({action: "getSchema", type: "httpHeaderAuth"})
 // → Returns: required fields, types, descriptions
 
 // Create credential
@@ -564,7 +675,29 @@ n8n_manage_credentials({
 
 // Delete credential
 n8n_manage_credentials({action: "delete", id: "123"})
+
+// List credentials WITH the workflows that reference each one
+n8n_manage_credentials({action: "list", includeUsage: true})
+// → Each credential gains: usedIn: [{id, name, active}], usageCount: N
+//   Response may include usageScanError if the workflow scan failed
+//   (base credential list still returned in that case)
+
+// Get one credential and the workflows that reference it
+n8n_manage_credentials({action: "get", id: "123", includeUsage: true})
+// → Adds usedIn and usageCount; on scan failure, response sets
+//   usageScanError and omits usedIn/usageCount
 ```
+
+**When to use `includeUsage`**:
+- Pre-deletion safety check: confirm a credential isn't referenced before `delete`
+- Credential rotation impact analysis: list affected workflows before updating secrets
+- Remediating findings from `n8n_audit_instance` (e.g., shared/over-privileged credentials)
+
+**`includeUsage` caveats**:
+- Triggers a full workflow scan client-side (n8n's API has no native lookup) — slower on large instances, especially when scanning hundreds of workflows
+- Capped at 5000 workflows (same ceiling as `n8n_audit_instance`); archived workflows are excluded by n8n
+- A "no usages" result does **not** guarantee the credential is unused — verify before destructive actions
+- On scan failure the response degrades gracefully: base credentials are returned with a `usageScanError` field rather than failing the whole call
 
 **Security**:
 - `get`, `create`, and `update` responses strip the `data` field (defense-in-depth)
@@ -575,6 +708,7 @@ n8n_manage_credentials({action: "delete", id: "123"})
 - Use `getSchema` before `create` to discover required fields for a credential type
 - The `data` field contains the actual secret values — provide it only on create/update
 - Always verify credential creation by listing afterward
+- Before `delete`, run `get` with `includeUsage: true` to see what breaks
 
 ---
 
@@ -768,6 +902,8 @@ validate_node({nodeType: "nodes-base.webhook", config: {}, mode: "minimal"})
 ## Best Practices
 
 ### Do
+- For simple workflows (<=5 nodes), use MCP tools directly — don't over-engineer the investigation
+- Use `patchNodeField` for surgical edits to Code node content instead of replacing the entire node
 - Use `get_node({detail: "standard"})` for most use cases
 - Specify validation profile explicitly (`profile: "runtime"`)
 - Use smart parameters (`branch`, `case`) for clarity
