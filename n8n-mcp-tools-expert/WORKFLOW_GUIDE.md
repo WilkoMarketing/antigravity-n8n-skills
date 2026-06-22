@@ -869,22 +869,42 @@ n8n_validate_workflow({
 
 **Use when**: Retrieving workflow details
 
+n8n has a **draft/publish model**: the workflow body holds the draft (your latest edits),
+while `mode: "active"` returns the published graph that's actually running. Pick the mode by
+how much you need and how big the workflow is.
+
 **Modes**:
-- `full` (default) - Complete workflow JSON
-- `details` - Full + execution stats
-- `structure` - Nodes + connections only
-- `minimal` - ID, name, active, tags
+- `full` (default) - Draft workflow JSON + metadata
+- `details` - Full + execution stats (success/error counts, last run)
+- `active` - The published (running) graph; returns `code: "NO_ACTIVE_VERSION"` if the workflow was never activated
+- `structure` - Nodes + connections only (topology, no `parameters`)
+- `filtered` - Full config of **only** the nodes named in `nodeNames` (matched by node name *or* node id), plus light metadata. Use it to read one heavy node — e.g. a Code node with long `jsCode`/`pythonCode` — on a large workflow that would otherwise get truncated client-side when fetched whole
+- `minimal` - ID, name, active, tags (fastest)
 
 ```javascript
-// Full workflow
+// Full draft workflow
 n8n_get_workflow({id: "workflow-id"})
 
-// Just structure
+// Just the topology (cheap; strips parameters)
 n8n_get_workflow({id: "workflow-id", mode: "structure"})
+
+// Read one heavy node without the whole workflow (avoids client-side truncation)
+n8n_get_workflow({id: "workflow-id", mode: "filtered", nodeNames: ["Process Data"]})
 
 // Minimal metadata
 n8n_get_workflow({id: "workflow-id", mode: "minimal"})
 ```
+
+**Recommended flow for big workflows**: `mode: "structure"` to discover node names cheaply →
+`mode: "filtered"` with those names to pull the specific heavy node's full config. This is the
+fix for the case where `full`/`active` returns a payload large enough that the client truncates
+it and you can't read the Code-node source at all.
+
+**`filtered` mode returns**: `{ id, name, active, isArchived, nodes[] (full config of matched nodes only), nodeCount (total in workflow), returnedCount, notFound? }`. It omits `connections` and the rest of the graph by design, so the response stays small.
+
+**`filtered` pitfalls**:
+- Requires a non-empty `nodeNames` array. Entries that match nothing come back in a `notFound` list rather than erroring, so a partial request stays transparent — check `notFound` before assuming a node is missing.
+- `nodeNames` matches each entry against node **name OR id** in one namespace, so `returnedCount` can exceed `nodeNames.length` when a name collides with another node's id, or when the workflow has duplicate node names. Disambiguate by the `id` on each returned node.
 
 ---
 

@@ -54,7 +54,7 @@ Validation errors are common:
 
 ```
 n8n-validation-expert/
-├── SKILL.md (690 lines)
+├── SKILL.md
 │   Core validation concepts and workflow
 │   - Validation philosophy
 │   - Error severity levels
@@ -66,7 +66,7 @@ n8n-validation-expert/
 │   - Recovery strategies
 │   - Best practices
 │
-├── ERROR_CATALOG.md (865 lines)
+├── ERROR_CATALOG.md
 │   Complete error reference with examples
 │   - 9 error types with real examples
 │   - missing_required (45% of errors)
@@ -78,7 +78,7 @@ n8n-validation-expert/
 │   - Recovery patterns
 │   - Summary with frequencies
 │
-├── FALSE_POSITIVES.md (669 lines)
+├── FALSE_POSITIVES.md
 │   When warnings are acceptable
 │   - Philosophy of warning acceptance
 │   - 6 common false positive types
@@ -92,7 +92,7 @@ n8n-validation-expert/
     Skill metadata and statistics
 ```
 
-**Total**: ~2,224 lines across 4 files
+**Total**: 4 files
 
 ## Common Error Types
 

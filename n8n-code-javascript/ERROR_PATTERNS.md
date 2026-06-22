@@ -652,7 +652,7 @@ Since n8n v2.0, Code nodes execute in the **task runner sandbox** which delibera
 
 ```javascript
 // ❌ BLOCKED in task runner sandbox (default since v2.0)
-const data = await $helpers.httpRequestWithAuthentication.call(
+const data = await this.helpers.httpRequestWithAuthentication.call(
   this,
   'baseLinkerApi',
   { url: '...', method: 'POST' }
@@ -686,7 +686,7 @@ Then wire to **Execute Workflow** → child workflow with **Execute Workflow Tri
 // ✅ Works — manual auth header, token came from upstream
 const token = $('Get Token').first().json.access_token;
 
-const data = await $helpers.httpRequest({
+const data = await this.helpers.httpRequest({
   url: 'https://api.example.com/data',
   headers: { 'Authorization': `Bearer ${token}` }
 });
@@ -698,7 +698,7 @@ const data = await $helpers.httpRequest({
 |------|-----|
 | Single authenticated API call | HTTP Request node directly |
 | Many API calls + pre/post processing | Sub-workflow pattern (Option B) |
-| Token already in the data flow | Manual `$helpers.httpRequest()` with header |
+| Token already in the data flow | Manual `this.helpers.httpRequest()` with header |
 | `httpRequestWithAuthentication` | **Doesn't work — pick A, B, or C above** |
 
 ---

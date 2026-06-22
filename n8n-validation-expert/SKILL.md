@@ -189,285 +189,47 @@ Choose the right profile for your stage:
 
 ## Common Error Types
 
-### 1. missing_required
-**What it means**: A required field is not provided
+Five core error types, in rough order of frequency:
 
-**How to fix**:
-1. Use `get_node` to see required fields
-2. Add the missing field to your configuration
-3. Provide an appropriate value
+- **`missing_required`** — a required field isn't provided. Use `get_node` to see required fields, then add it.
+- **`invalid_value`** — value doesn't match allowed options (enums are case-sensitive). Check the error's allowed list or `get_node`.
+- **`type_mismatch`** — wrong data type (string `"100"` vs number `100`). Convert to the expected type.
+- **`invalid_expression`** — expression syntax error (missing `{{}}`, typos). See the n8n Expression Syntax skill.
+- **`invalid_reference`** — referenced node doesn't exist (renamed, deleted, or misspelled). Fix the name or `cleanStaleConnections`.
 
-**Example**:
-```javascript
-// Error
-{
-  "type": "missing_required",
-  "property": "channel",
-  "message": "Channel name is required"
-}
+A sixth class, **`patchNodeField` errors** (find-not-found, ambiguous match, invalid/unsafe regex), surfaces when a `patchNodeField` op fails during `n8n_update_partial_workflow` — it's strict by design and errors rather than silently continuing.
 
-// Fix
-config.channel = "#general";
-```
-
-### 2. invalid_value
-**What it means**: Value doesn't match allowed options
-
-**How to fix**:
-1. Check error message for allowed values
-2. Use `get_node` to see options
-3. Update to a valid value
-
-**Example**:
-```javascript
-// Error
-{
-  "type": "invalid_value",
-  "property": "operation",
-  "message": "Operation must be one of: post, update, delete",
-  "current": "send"
-}
-
-// Fix
-config.operation = "post";  // Use valid operation
-```
-
-### 3. type_mismatch
-**What it means**: Wrong data type for field
-
-**How to fix**:
-1. Check expected type in error message
-2. Convert value to correct type
-
-**Example**:
-```javascript
-// Error
-{
-  "type": "type_mismatch",
-  "property": "limit",
-  "message": "Expected number, got string",
-  "current": "100"
-}
-
-// Fix
-config.limit = 100;  // Number, not string
-```
-
-### 4. invalid_expression
-**What it means**: Expression syntax error
-
-**How to fix**:
-1. Use n8n Expression Syntax skill
-2. Check for missing `{{}}` or typos
-3. Verify node/field references
-
-**Example**:
-```javascript
-// Error
-{
-  "type": "invalid_expression",
-  "property": "text",
-  "message": "Invalid expression: $json.name",
-  "current": "$json.name"
-}
-
-// Fix
-config.text = "={{$json.name}}";  // Add {{}}
-```
-
-### 5. invalid_reference
-**What it means**: Referenced node doesn't exist
-
-**How to fix**:
-1. Check node name spelling
-2. Verify node exists in workflow
-3. Update reference to correct name
-
-**Example**:
-```javascript
-// Error
-{
-  "type": "invalid_reference",
-  "property": "expression",
-  "message": "Node 'HTTP Requets' does not exist",
-  "current": "={{$node['HTTP Requets'].json.data}}"
-}
-
-// Fix - correct typo
-config.expression = "={{$node['HTTP Request'].json.data}}";
-```
-
-### 6. patchNodeField Errors
-**What it means**: A `patchNodeField` operation failed during `n8n_update_partial_workflow`
-
-The `patchNodeField` operation is strict by design — it errors instead of silently continuing when something is wrong. This catches mistakes early but means you need to handle these specific error cases.
-
-**Error: Find string not found**
-The patch's `find` value doesn't exist in the target field. This usually means the content was already changed, or the find string has a typo.
-
-```
-patchNodeField: find string not found in field "parameters.jsCode"
-```
-
-**How to fix**: Double-check the exact string. Use `n8n_get_workflow` to inspect the current field value. Whitespace and line endings matter — if unsure, use `regex: true` with `\s+` for flexible whitespace matching.
-
-**Error: Ambiguous match (multiple occurrences)**
-The find string appears more than once in the field. Without `replaceAll: true`, this is treated as ambiguous and rejected.
-
-```
-patchNodeField: find string matches 3 times in field "parameters.jsCode" — set replaceAll: true to replace all, or use a more specific find string
-```
-
-**How to fix**: Either set `replaceAll: true` if you want to replace all occurrences, or make your find string more specific to match only the intended location.
-
-**Error: Invalid regex pattern**
-When `regex: true`, the pattern is validated for correctness and safety.
-
-```
-patchNodeField: invalid or unsafe regex pattern
-```
-
-**How to fix**: Check regex syntax. Nested quantifiers like `(a+)+` and overlapping alternations like `(\w|\d)+` are rejected as ReDoS risks. Simplify the pattern.
+Every type above has worked examples (broken config → fix) plus the patchNodeField error cases and their fixes in **[ERROR_CATALOG.md](ERROR_CATALOG.md)**.
 
 ---
 
 ## Auto-Sanitization System
 
-### What It Does
-**Automatically fixes common operator structure issues** on ANY workflow update
+**Automatically fixes common operator structure issues** on ANY workflow update — `n8n_create_workflow`, `n8n_update_partial_workflow`, or any save. Trust it; don't hand-fix these.
 
-**Runs when**:
-- `n8n_create_workflow`
-- `n8n_update_partial_workflow`
-- Any workflow save operation
+**What it fixes**:
+- **Binary operators** (equals, notEquals, contains, notContains, greaterThan, lessThan, startsWith, endsWith) — removes the wrong `singleValue` property.
+- **Unary operators** (isEmpty, isNotEmpty, true, false) — adds `singleValue: true`.
+- **IF/Switch metadata** — adds complete `conditions.options` metadata for IF v2.2+ and Switch v3.2+.
 
-### What It Fixes
+**What it CANNOT fix** (handle manually): broken connections to non-existent nodes (use `cleanStaleConnections`), branch-count mismatches (add/remove connections or rules), and paradoxical corrupt states (may need manual DB intervention).
 
-#### 1. Binary Operators (Two Values)
-**Operators**: equals, notEquals, contains, notContains, greaterThan, lessThan, startsWith, endsWith
-
-**Fix**: Removes `singleValue` property (binary operators compare two values)
-
-**Before**:
-```javascript
-{
-  "type": "boolean",
-  "operation": "equals",
-  "singleValue": true  // ❌ Wrong!
-}
-```
-
-**After** (automatic):
-```javascript
-{
-  "type": "boolean",
-  "operation": "equals"
-  // singleValue removed ✅
-}
-```
-
-#### 2. Unary Operators (One Value)
-**Operators**: isEmpty, isNotEmpty, true, false
-
-**Fix**: Adds `singleValue: true` (unary operators check single value)
-
-**Before**:
-```javascript
-{
-  "type": "boolean",
-  "operation": "isEmpty"
-  // Missing singleValue ❌
-}
-```
-
-**After** (automatic):
-```javascript
-{
-  "type": "boolean",
-  "operation": "isEmpty",
-  "singleValue": true  // ✅ Added
-}
-```
-
-#### 3. IF/Switch Metadata
-**Fix**: Adds complete `conditions.options` metadata for IF v2.2+ and Switch v3.2+
-
-### What It CANNOT Fix
-
-#### 1. Broken Connections
-References to non-existent nodes
-
-**Solution**: Use `cleanStaleConnections` operation in `n8n_update_partial_workflow`
-
-#### 2. Branch Count Mismatches
-3 Switch rules but only 2 output connections
-
-**Solution**: Add missing connections or remove extra rules
-
-#### 3. Paradoxical Corrupt States
-API returns corrupt data but rejects updates
-
-**Solution**: May require manual database intervention
+Before/after examples and the full cannot-fix detail are in **[ERROR_CATALOG.md](ERROR_CATALOG.md)** (Auto-Sanitization sections).
 
 ---
 
 ## False Positives
 
-### What Are They?
-Validation warnings that are technically "wrong" but acceptable in your use case
+Validation warnings that are technically "wrong" but acceptable in your use case. Not every warning needs a fix — many are context-dependent. Common ones and when each is acceptable vs. worth fixing:
 
-### Common False Positives
+- **"Missing error handling"** — OK for dev/testing and non-critical notifications; fix for production handling important data.
+- **"No retry logic"** — OK for idempotent ops, APIs with their own retry, manual triggers; fix for flaky external services and production automation.
+- **"Missing rate limiting"** — OK for internal/low-volume/server-side-limited APIs; fix for public, high-volume APIs.
+- **"Unbounded query"** — OK for small known datasets, aggregations, dev/testing; fix for production queries on large tables.
 
-#### 1. "Missing error handling"
-**Warning**: No error handling configured
+**Reduce false positives** with the `ai-friendly` profile (e.g. `validate_node({nodeType, config, profile: "ai-friendly"})`).
 
-**When acceptable**:
-- Simple workflows where failures are obvious
-- Testing/development workflows
-- Non-critical notifications
-
-**When to fix**: Production workflows handling important data
-
-#### 2. "No retry logic"
-**Warning**: Node doesn't retry on failure
-
-**When acceptable**:
-- APIs with their own retry logic
-- Idempotent operations
-- Manual trigger workflows
-
-**When to fix**: Flaky external services, production automation
-
-#### 3. "Missing rate limiting"
-**Warning**: No rate limiting for API calls
-
-**When acceptable**:
-- Internal APIs with no limits
-- Low-volume workflows
-- APIs with server-side rate limiting
-
-**When to fix**: Public APIs, high-volume workflows
-
-#### 4. "Unbounded query"
-**Warning**: SELECT without LIMIT
-
-**When acceptable**:
-- Small known datasets
-- Aggregation queries
-- Development/testing
-
-**When to fix**: Production queries on large tables
-
-### Reducing False Positives
-
-**Use `ai-friendly` profile**:
-```javascript
-validate_node({
-  nodeType: "nodes-base.slack",
-  config: {...},
-  profile: "ai-friendly"  // Fewer false positives
-})
-```
+Full per-case guidance, security/credential warnings, known n8n false-positive issues (#304, #306, #338), profile strategies, the "should I fix this?" decision framework, and how to document accepted warnings are in **[FALSE_POSITIVES.md](FALSE_POSITIVES.md)**.
 
 ---
 
@@ -510,37 +272,10 @@ validate_node({
 
 ### How to Read It
 
-#### 1. Check `valid` field
-```javascript
-if (result.valid) {
-  // ✅ Configuration is valid
-} else {
-  // ❌ Has errors - must fix before deployment
-}
-```
-
-#### 2. Fix errors first
-```javascript
-result.errors.forEach(error => {
-  console.log(`Error in ${error.property}: ${error.message}`);
-  console.log(`Fix: ${error.fix}`);
-});
-```
-
-#### 3. Review warnings
-```javascript
-result.warnings.forEach(warning => {
-  console.log(`Warning: ${warning.message}`);
-  console.log(`Suggestion: ${warning.suggestion}`);
-  // Decide if you need to address this
-});
-```
-
-#### 4. Consider suggestions
-```javascript
-// Optional improvements
-// Not required but may enhance workflow
-```
+1. **Check `valid` first** — `true` means the config is valid; `false` means there are errors to fix before deployment.
+2. **Fix `errors` first** — each carries a `property`, `message`, and `fix`. These must be resolved.
+3. **Review `warnings`** — each has a `message` and `suggestion`; decide per-case whether to address it (see False Positives above).
+4. **Consider `suggestions`** — optional improvements, not required.
 
 ---
 
@@ -729,12 +464,19 @@ n8n_autofix_workflow({
 
 ---
 
+## Reviewing an existing workflow
+
+Validating as you build (the loop above) is for catching schema and shape errors in your own in-progress work. **Reviewing an existing workflow** — yours or one you've been handed — is a different job: the workflow already passes `validate_workflow` clean, and you're hunting for the issues validation doesn't see (silent connection bugs, injection-prone queries, dropped-item Switches, Set/Code antipatterns, missing error paths). For that, pull the workflow with `n8n_get_workflow` and walk **[REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md)** — a severity-tiered audit (MUST FIX / SHOULD FIX / NICE TO HAVE) where every item points to the canonical skill for the fix. Run `n8n_audit_instance` alongside it to surface hardcoded secrets and unauthenticated webhooks across the whole instance.
+
+---
+
 ## Detailed Guides
 
-For comprehensive error catalogs and false positive examples:
+For comprehensive error catalogs, false positives, and workflow review:
 
 - **[ERROR_CATALOG.md](ERROR_CATALOG.md)** - Complete list of error types with examples
 - **[FALSE_POSITIVES.md](FALSE_POSITIVES.md)** - When warnings are acceptable
+- **[REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md)** - Severity-tiered audit for reviewing an existing workflow
 
 ---
 
