@@ -71,7 +71,7 @@ If you catch yourself thinking any of these, stop and invoke the named skill fir
 | "Date math — I'll drop in a DateTime node" | `n8n-expression-syntax` — Luxon inline is almost always right |
 | "I'll wire a Merge with 3 sources" | `n8n-node-configuration` — Merge defaults to 2 inputs; the 3rd silently drops |
 | "Validation passed, I'm ready to activate" | `n8n-validation-expert` + `n8n-workflow-patterns` — run the antipattern scan |
-| "Validation threw an error I don't understand" | `n8n-validation-expert` — some warnings are false positives, some errors are real |
+| "Validation threw an error I don't understand" | `n8n-validation-expert` — what each error and warning means, and which are must-fix vs. best-practice advice |
 | "I'll reference `$json.x` here" | `n8n-expression-syntax` — prefer `$('Node').item.json.x` in branchy workflows |
 | "This webhook/scheduled flow is happy-path only" | `n8n-error-handling` — wire an error branch on every fallible node; 4xx caller faults, 5xx yours |
 | "I'll pass this file/image through as JSON" | `n8n-binary-and-data` — file contents live in `$binary`, and can't cross the agent-tool boundary |
@@ -116,7 +116,7 @@ closes the gap where a tool's full description isn't loaded until first use.
 - `n8n_update_partial_workflow` — incremental diff ops (`{id, operations:[…]}`): addNode, updateNode, patchNodeField, addConnection, activateWorkflow, etc. Preferred for edits.
 - `n8n_update_full_workflow` — full replacement.
 - `n8n_autofix_workflow` — auto-fix common issues.
-- `n8n_generate_workflow` / `n8n_deploy_template` — generate or deploy a template to the instance.
+- `n8n_deploy_template` — deploy a template to the instance.
 
 **Validate** (necessary, not sufficient — always pair with the antipattern scan)
 - `validate_workflow` — full JSON in, errors/warnings/fixes out. Node types here are **LONG form** (`n8n-nodes-base.set`).
