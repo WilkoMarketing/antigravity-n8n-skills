@@ -39,10 +39,15 @@ x-n8n: &n8n
     - N8N_HIRING_BANNER_ENABLED=false
     - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
     - N8N_RUNNERS_ENABLED=true
-    # Filesystem binary mode is fine here because main + workers SHARE the
-    # n8n_storage volume on this one host. For workers on SEPARATE hosts, switch
-    # to S3 (N8N_DEFAULT_BINARY_DATA_MODE=s3) — see QUEUE_MODE.md.
-    - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+    # Queue mode does NOT support filesystem binary mode — binary data lives in
+    # Postgres (`database`) so main + workers all see it. S3/Azure external
+    # storage needs an Enterprise license — see QUEUE_MODE.md.
+    - N8N_DEFAULT_BINARY_DATA_MODE=database
+    # Pruning is what keeps the DB bounded now that executions AND binary data
+    # live in Postgres (on by default upstream; made explicit + raised count).
+    - EXECUTIONS_DATA_PRUNE=true
+    - EXECUTIONS_DATA_MAX_AGE=336
+    - EXECUTIONS_DATA_PRUNE_MAX_COUNT=50000
   volumes:
     - n8n_storage:/home/node/.n8n
   depends_on:
@@ -74,6 +79,8 @@ services:
       - n8n_net
 
   postgres:
+    # n8n supports "actively maintained" Postgres versions — 16 is fine through ~2028;
+    # revisit the pin when it nears EOL.
     image: postgres:16
     restart: unless-stopped
     environment:
@@ -136,7 +143,10 @@ services:
       - N8N_HIRING_BANNER_ENABLED=false
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
       - N8N_RUNNERS_ENABLED=true
-      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+      - N8N_DEFAULT_BINARY_DATA_MODE=database
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=336
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=50000
       # public URL / reverse proxy (main only)
       - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
       - N8N_PORT=5678
