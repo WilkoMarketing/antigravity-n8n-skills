@@ -24,7 +24,8 @@ n8n_create_workflow({
   name: "Webhook to Slack",  // Required
   nodes: [...],              // Required: array of nodes
   connections: {...},        // Required: connections object
-  settings: {...}            // Optional: workflow settings
+  settings: {...},           // Optional: workflow settings
+  parentFolderId: "abc123"   // Optional: folder to create in (n8n 2.32+; omit = project root)
 })
 ```
 
@@ -72,6 +73,7 @@ n8n_create_workflow({
 - Workflows created **inactive** (activate with `activateWorkflow` operation)
 - Auto-sanitization runs on creation
 - Validate before creating for best results
+- `parentFolderId` places the workflow in a folder at creation (find or create folders with `n8n_manage_folders`). On n8n < 2.32 the whole create is rejected with a 400 naming the field — retry without it
 
 ---
 
@@ -83,7 +85,7 @@ n8n_create_workflow({
 
 **Common pattern**: 56s average between edits (iterative building!)
 
-### 19 Operation Types
+### 21 Operation Types
 
 **Node Operations** (7 types):
 1. `addNode` - Add new node
@@ -101,18 +103,20 @@ n8n_create_workflow({
 11. `cleanStaleConnections` - Auto-remove broken connections
 12. `replaceConnections` - Replace entire connections object
 
-**Metadata Operations** (4 types):
+**Metadata Operations** (5 types):
 13. `updateSettings` - Workflow settings
 14. `updateName` - Rename workflow
-15. `addTag` - Add tag
-16. `removeTag` - Remove tag
+15. `setNodeGroups` - Replace the canvas groups (n8n 2.28+; see below)
+16. `addTag` - Add tag
+17. `removeTag` - Remove tag
 
 **Activation Operations** (2 types):
-17. `activateWorkflow` - Activate workflow for automatic execution
-18. `deactivateWorkflow` - Deactivate workflow
+18. `activateWorkflow` - Activate workflow for automatic execution
+19. `deactivateWorkflow` - Deactivate workflow
 
-**Project Management Operations** (1 type):
-19. `transferWorkflow` - Transfer workflow to a different project (enterprise/cloud)
+**Project Management Operations** (2 types):
+20. `transferWorkflow` - Transfer workflow to a different project (enterprise/cloud)
+21. `moveToFolder` - Move workflow into a folder, or to the project root with `parentFolderId: null` (n8n 2.32+)
 
 ### Intent Parameter (IMPORTANT!)
 
@@ -361,6 +365,111 @@ n8n_update_partial_workflow({
   ]
 })
 ```
+
+### Canvas Groups (n8n 2.28+)
+
+A canvas group is a named frame drawn around a connected run of non-trigger nodes. Purely
+presentational — it changes nothing about execution — but **n8n validates groups on every write,
+including writes that have nothing to do with grouping.** That is the part worth understanding,
+because it used to make unrelated edits fail.
+
+**You do not have to manage groups to edit a grouped workflow.** n8n-mcp reconciles them with the
+graph you produce, once, at the end of a diff:
+
+- A grouped node you remove is pruned from its group; the group survives on its remaining members.
+- A group left with no members is dropped.
+- A group n8n refuses (its members are no longer a single connected run) is ungrouped so your edit
+  still lands. **Nodes and connections are never altered to save a group.**
+
+Every adjustment comes back in `details.warnings`. Read them — they are the only signal that a
+user's grouping changed as a side effect of your edit.
+
+**Authoring groups** with `setNodeGroups`. It replaces the whole list, like `replaceConnections`:
+
+```javascript
+n8n_update_partial_workflow({
+  id: "workflow-id",
+  intent: "Group the enrichment steps",
+  operations: [{
+    type: "setNodeGroups",
+    nodeGroups: [
+      { name: "Enrich lead", nodeNames: ["Fetch company", "Score lead"] },
+      { name: "Notify", nodeIds: ["a1b2c3d4"] }          // ids work too
+    ]
+  }]
+})
+```
+
+- Pass **every group you want to keep** — anything you omit is gone.
+- `nodeGroups: []` ungroups everything.
+- Give each group `nodeNames` **or** `nodeIds`, not both populated. The group `id` is generated
+  unless you supply one.
+- `description` is optional, max 155 characters, and only exists on n8n 2.32+. On older instances
+  it is dropped with a warning rather than failing the write.
+
+**Creating a workflow with groups.** `n8n_create_workflow` and `n8n_update_full_workflow` take the
+same field, in n8n's own shape — members are node **IDs**, because you are sending those nodes in
+the same payload:
+
+```javascript
+n8n_create_workflow({
+  name: "Lead pipeline",
+  nodes: [...],
+  connections: {...},
+  nodeGroups: [{ name: "Enrich lead", nodeIds: ["fetch-company", "score-lead"] }]
+})
+```
+
+On a full update the field follows the same rule as `settings`: **omit it to keep the stored groups**,
+pass `[]` to ungroup everything. An id that is not in `nodes[]` is an error, not something to repair
+quietly — you supplied both halves, so a mismatch is a bug in the request.
+
+**What n8n will reject.** Members must form a single connected run with one way in and one way out,
+and a trigger can never be inside a group. n8n decides this, not n8n-mcp — so its message is
+returned to you verbatim. A group *you* asked for in this request is never silently discarded: if
+n8n refuses it you get an error, not a quiet success.
+
+```
+Node group "Enrich lead" (…) must form a single connected subgraph with a single entry and exit.
+Node group "Enrich lead" (…) cannot contain trigger nodes: Manual Trigger.
+```
+
+When that happens, fix the selection — usually by including the node that sits between two members,
+or excluding the trigger — rather than retrying the same shape.
+
+**Older instances.** Canvas groups do not exist before n8n 2.28. Authoring them there saves the
+workflow without groups and warns; it does not fail.
+
+**Reading groups.** `n8n_get_workflow` returns `nodeGroups` in `full`, `details` and `structure`
+modes when the workflow has any. `mode: "active"` returns the *published* version's groups, which
+can differ from the draft's.
+
+### moveToFolder (Folder Placement, n8n 2.32+)
+
+Move the workflow into a folder as part of a diff:
+
+```javascript
+n8n_update_partial_workflow({
+  id: "workflow-id",
+  intent: "Move into the Production folder",
+  operations: [
+    {type: "moveToFolder", parentFolderId: "abc123"}  // or null = project root
+  ]
+})
+```
+
+n8n treats a workflow's folder as **write-only**: it can be set but never read back
+(no field in `n8n_get_workflow`, no folder filter on `n8n_list_workflows`). Verify a
+move indirectly — `n8n_manage_folders({action: "get", folderId: "abc123"})` reports the
+folder's recursive `totalWorkflows` — or visually in the n8n UI. Two consequences:
+
+- If a mixed update fails after the PUT persisted, the rollback restores the graph but
+  **cannot** restore the previous folder (it was never readable); the error says so.
+- Combined with `transferWorkflow` in one request, the folder move applies in the
+  *source* project before the transfer — move in a separate call after transferring.
+
+On n8n < 2.32 the operation fails with a 400 naming `parentFolderId` plus upgrade
+guidance. Find or create folders with `n8n_manage_folders` (see below).
 
 ### Cleanup & Recovery
 
@@ -845,9 +954,9 @@ n8n_executions({
 
 ## n8n_evaluations (EVALUATION TEST RUNS)
 
-**Use when**: Reading evaluation test runs — polling a run started in the editor, comparing metrics across runs, pulling per-case results into a report or dashboard.
+**Use when**: Working with evaluation test runs — starting or cancelling a run, polling one in progress, comparing metrics across runs, pulling per-case results into a report or dashboard.
 
-Read-only. Requires n8n >= 2.30 **and an API key created on 2.30+** — keys created earlier silently lack the `testRun` scopes, so a 403 means "re-create the API key", not a bug. Runs exist only for workflows with an evaluation trigger that have been run from the n8n editor; triggering runs via the public API is not yet supported by n8n (planned upstream, will arrive as `run`/`cancel` actions).
+Reads (`list_runs`/`get_run`/`list_cases`) require n8n >= 2.30 and an API key created on 2.30+; `run`/`cancel` require n8n >= 2.32 and a key created on 2.32+ — older keys silently lack the `testRun` scopes. A 403 can mean: a key created before the action's minimum version (re-create it), evaluations not licensed on the plan, or the key's owner lacking access to the workflow — for `run`/`cancel`, specifically the `workflow:execute` scope. Runs exist only for workflows with an evaluation trigger.
 
 ### List Test Runs
 ```javascript
@@ -883,10 +992,97 @@ n8n_evaluations({
 // with n8n_executions({action: "get", id: executionId, mode: "error"})
 ```
 
+### Start a Run
+```javascript
+n8n_evaluations({
+  action: "run",
+  workflowId: "workflow-id"
+})
+// → {id, status: "new", createdAt} — poll with get_run until completed
+```
+`run` executes the workflow once per dataset row — real nodes fire (HTTP calls,
+DB writes, sends) and LLM metric calls cost money. Ask the user before starting
+a run, especially against a large dataset.
+
+### Cancel a Run
+```javascript
+n8n_evaluations({
+  action: "cancel",
+  workflowId: "workflow-id",
+  runId: "run-id"
+})
+// → {id, status: "cancelled"} plus a note: in-flight cases stop
+// asynchronously — confirm with get_run that the run reached "cancelled"
+```
+
 **Gotchas**:
-- A 404 can mean three things: the instance predates 2.30, the workflowId is wrong, or the runId belongs to a different workflow (the tool's error message disambiguates using the instance version)
-- Evaluations are license/quota-gated in n8n — an instance without the feature simply has no runs
+- A 404 can mean three things: the instance predates the action's minimum version, the workflowId is wrong, or the runId belongs to a different workflow (the tool's error message disambiguates using the instance version when it can read it)
+- Pre-2.32 instances answer `run` with 405 (the route exists, GET-only) and `cancel` with 404 (the route does not exist); the tool folds both into its upgrade guidance
+- 409 on `run` = the workflow has no evaluation trigger; 409 on `cancel` = the run already finished
+- 402 on `run` = the license's evaluation-run quota is exhausted
+- Evaluations are license/quota-gated in n8n — an unlicensed instance answers `run`/`cancel` with 403, and its reads have no runs to return
 - Compare `metrics` across runs of the same workflow to catch prompt/model regressions
+
+---
+
+## n8n_manage_folders (FOLDER MANAGEMENT)
+
+**Use when**: Organizing workflows into folders — creating structure before deploying a batch, restructuring a grown instance, or finding where to place a new workflow.
+
+Folder CRUD needs n8n >= 2.19 and a licensed instance (folders unlock on the **registered free Community tier** — Settings → Usage and plan → register — and up) plus `folder:*` API key scopes. Placing *workflows* into folders needs n8n >= 2.32 and happens in the workflow tools (`parentFolderId` on `n8n_create_workflow`, `moveToFolder` op), not here.
+
+### 6 Actions
+
+`create`, `list`, `get`, `rename`, `move`, `delete`. `projectId` defaults to `'personal'` (the calling user's personal project) on every action — pass a real project ID on multi-project enterprise instances.
+
+### Create a Folder
+
+```javascript
+n8n_manage_folders({action: "create", name: "Production"})
+// Nested: add parentFolderId: "abc123"
+// → {id, name, parentFolderId}
+```
+
+### List Folders (with contents counts)
+
+```javascript
+n8n_manage_folders({action: "list"})
+// Optional: nameFilter (contains match), parentFolderId (direct children only),
+//           sortBy ("name:asc" ... default "updatedAt:desc"), skip, take (max 100)
+// → folders: [{id, name, parentFolder, workflowCount, subFolderCount, path}], count
+// count = total matching the query, not the page size; path = names from root
+```
+
+### Folder Details (recursive totals)
+
+```javascript
+n8n_manage_folders({action: "get", folderId: "abc123"})
+// → {..., totalSubFolders, totalWorkflows}  // recursive — this is how you verify
+//    a workflow placement, since n8n never reports a workflow's folder directly
+```
+
+### Rename / Move
+
+```javascript
+n8n_manage_folders({action: "rename", folderId: "abc123", name: "Staging"})
+n8n_manage_folders({action: "move", folderId: "abc123", parentFolderId: "def456"})
+n8n_manage_folders({action: "move", folderId: "abc123", parentFolderId: null})  // → project root
+```
+
+### Delete (read this one)
+
+```javascript
+n8n_manage_folders({action: "delete", folderId: "abc123", transferToFolderId: "0"})
+```
+
+Without `transferToFolderId`, the folder's workflows are moved to the project root **and ARCHIVED** (deactivated), and sub-folders are deleted. Pass `transferToFolderId` to move contents somewhere first — `"0"` means the project root and keeps workflows active. Prefer the transfer form unless archiving is intended.
+
+**Gotchas**:
+- Folder names are not unique — `list` before `create` to avoid duplicates
+- A workflow's folder cannot be read back through the API; don't build logic that queries folder membership. Folder contents are visible only as counts
+- The `'personal'` default resolves through the projects API when licensed; on Community (where that API is 403) it infers the project from an existing workflow — a brand-new instance with zero workflows needs an explicit `projectId`, or create any workflow first
+- 403 = missing `folder:*` scopes or an unregistered/unlicensed instance; 404 = wrong project/folder ID, or n8n < 2.19 (no folders API at all)
+- On n8n 2.19–2.31 folder CRUD works but workflow placement doesn't (that needs 2.32+)
 
 ---
 
@@ -993,7 +1189,7 @@ update → update → update → ... (56s avg between edits)
 - `n8n_workflow_versions` - Version control & rollback
 - `n8n_test_workflow` - Trigger execution
 - `n8n_executions` - Manage executions
-- `n8n_evaluations` - Read evaluation test runs (n8n 2.30+, read-only)
+- `n8n_evaluations` - Evaluation test runs: reads (n8n 2.30+), run/cancel (n8n 2.32+)
 - `n8n_manage_datatable` - Data table and row management
 - `n8n_manage_credentials` - Credential CRUD + schema discovery
 - `n8n_audit_instance` - Security audit (built-in + custom scan)

@@ -113,7 +113,8 @@ closes the gap where a tool's full description isn't loaded until first use.
 
 **Build & edit**
 - `n8n_create_workflow` — create from full workflow JSON.
-- `n8n_update_partial_workflow` — incremental diff ops (`{id, operations:[…]}`): addNode, updateNode, patchNodeField, addConnection, activateWorkflow, etc. Preferred for edits.
+- `n8n_update_partial_workflow` — incremental diff ops (`{id, operations:[…]}`): addNode, updateNode, patchNodeField, addConnection, setNodeGroups, activateWorkflow, etc. Preferred for edits.
+- **Canvas groups** (n8n 2.28+) survive your edits without being managed: a grouped node you remove is pruned from its group, and a group n8n can no longer accept is ungrouped so the edit still lands — nodes and connections untouched, every adjustment reported in `details.warnings`. To create or change groups, use the `setNodeGroups` op (full replacement; `[]` ungroups everything). See `n8n-mcp-tools-expert`.
 - `n8n_update_full_workflow` — full replacement.
 - `n8n_autofix_workflow` — auto-fix common issues.
 - `n8n_deploy_template` — deploy a template to the instance.
@@ -130,10 +131,11 @@ closes the gap where a tool's full description isn't loaded until first use.
 **Test & run**
 - `n8n_test_workflow` — runs real nodes (Code, HTTP, DB writes, sends all fire). Ask the user before running when side effects exist.
 - `n8n_executions` — list/inspect executions. **There is no `execute_workflow` tool.**
-- `n8n_evaluations` — read evaluation test runs (n8n ≥ 2.30): list runs, aggregated metrics, per-case results. Read-only — runs are started from the n8n editor, not the API; a 403 usually means the API key predates 2.30 (re-create it for the testRun scopes).
+- `n8n_evaluations` — evaluation test runs: list runs, aggregated metrics, per-case results (n8n ≥ 2.30), plus `run`/`cancel` to start or stop a run (n8n ≥ 2.32). `run` executes the workflow against its whole dataset — real nodes fire, so ask the user first. A 403 can mean the API key was created before the action's minimum version (re-create it for the testRun scopes), evaluations aren't licensed on the plan, or the key's owner lacks access to the workflow — for `run`/`cancel`, specifically the `workflow:execute` scope.
 
-**Data, credentials, audit**
+**Data, folders, credentials, audit**
 - `n8n_manage_datatable` — Data Table CRUD, filtering, dry-run.
+- `n8n_manage_folders` — workflow folder CRUD with contents counts (n8n ≥ 2.19, registered Community tier and up; `projectId` defaults to `personal`). Place workflows via `parentFolderId` on `n8n_create_workflow` or the `moveToFolder` op (n8n ≥ 2.32). Placement is write-only — verify via a folder's `get` counts, never by reading the workflow. `delete` without `transferToFolderId` moves the folder's workflows to the project root and ARCHIVES them — they still exist, but deactivated (`transferToFolderId: "0"` = transfer to project root without archiving).
 - `n8n_manage_credentials` — credential CRUD + `getSchema` discovery.
 - `n8n_audit_instance` — security audit (hardcoded secrets, unauthenticated webhooks, error-handling gaps).
 
